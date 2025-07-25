@@ -14,3 +14,6 @@ experimental_scripts
 tracks
 needs_cleanup
 old
+
+combine_*
+combined_*
