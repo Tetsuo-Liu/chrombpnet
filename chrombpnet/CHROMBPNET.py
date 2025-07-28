@@ -106,15 +106,25 @@ def main():
 	
 			os.makedirs(args.output_prefix+"_auxiliary/", exist_ok=False)
 	
-			from chrombpnet.helpers.make_gc_matched_negatives.get_genomewide_gc_buckets.get_genomewide_gc_bins import get_genomewide_gc
-			get_genomewide_gc(args.genome,args.output_prefix+"_auxiliary/genomewide_gc.bed",args.inputlen, args.stride)
+			import shutil
+			if args.precomputed_gc_profile:
+				print(f"Using precomputed GC profile from: {args.precomputed_gc_profile}")
+				shutil.copyfile(args.precomputed_gc_profile, args.output_prefix+"_auxiliary/genomewide_gc.bed")
+			else:
+				print("Calculating genomewide GC profile on the fly...")
+				from chrombpnet.helpers.make_gc_matched_negatives.get_genomewide_gc_buckets.get_genomewide_gc_bins import get_genomewide_gc
+				get_genomewide_gc(args.genome,args.output_prefix+"_auxiliary/genomewide_gc.bed",args.inputlen, args.stride)
 	
 			# get gc content in peaks
 			import chrombpnet.helpers.make_gc_matched_negatives.get_gc_content as get_gc_content
-			args_copy = copy.deepcopy(args)
-			args_copy.input_bed = args_copy.peaks
-			args_copy.output_prefix = args.output_prefix+"_auxiliary/foreground.gc"
-			get_gc_content.main(args_copy)
+			get_gc_content.process_gc_content(
+				input_bed=args.peaks,
+				chrom_sizes=args.chrom_sizes,
+				genome=args.genome,
+				output_prefix=args.output_prefix + "_auxiliary/foreground.gc",
+				inputlen=args.inputlen,
+				jobs=args.jobs if hasattr(args, 'jobs') else None
+			)
 	
 			# prepare candidate negatives
 	
@@ -130,8 +140,10 @@ def main():
 												chrom_sizes=args.chrom_sizes,
 												flank_size=args.inputlen//2,
 												output=args.output_prefix+"_auxiliary/blacklist_slop.bed"))
-										
-				exclude_bed = pd.concat([exclude_bed,pd.read_csv(args.output_prefix+"_auxiliary/blacklist_slop.bed",sep="\t",header=None, usecols=[0,1,2])])
+				
+				# Check if the slop output is not empty before concatenating
+				if os.path.getsize(args.output_prefix+"_auxiliary/blacklist_slop.bed") > 0:
+					exclude_bed = pd.concat([exclude_bed,pd.read_csv(args.output_prefix+"_auxiliary/blacklist_slop.bed",sep="\t",header=None, usecols=[0,1,2])])
 
 			exclude_bed.to_csv(args.output_prefix+"_auxiliary/exclude_unmerged.bed", sep="\t", header=False, index=False)
 			os.system("bedtools sort -i {inputb} | bedtools merge -i stdin > {output}".format(inputb=args.output_prefix+"_auxiliary/exclude_unmerged.bed",
