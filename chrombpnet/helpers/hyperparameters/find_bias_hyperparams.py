@@ -52,9 +52,31 @@ def main(args):
     test_chroms_to_keep=splits_dict["test"]
     print("evaluating hyperparameters on the following chromosomes",chroms_to_keep)
 
-    # read peaks and non peaks    
-    in_peaks =  pd.read_csv(args.peaks, sep='\t', header=None, names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
-    in_nonpeaks =  pd.read_csv(args.nonpeaks, sep='\t', header=None, names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
+    # read peaks and non peaks - handle both 3-column and 10-column BED files
+    def read_bed_with_summit(file_path):
+        # Try to read and determine number of columns
+        df = pd.read_csv(file_path, sep='\t', header=None)
+        
+        if df.shape[1] == 3:
+            # 3-column BED file: chr, start, end
+            df.columns = ["chr", "start", "end"]
+            # Calculate summit as peak center
+            df["summit"] = (df["end"] - df["start"]) // 2
+        elif df.shape[1] >= 10:
+            # 10-column BED file with summit in the last column
+            df.columns = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
+        else:
+            # Handle other formats by adding missing columns and calculating summit
+            base_columns = ["chr", "start", "end"]
+            extra_columns = [str(i) for i in range(1, df.shape[1] - 2)]
+            df.columns = base_columns + extra_columns
+            # Calculate summit as peak center
+            df["summit"] = (df["end"] - df["start"]) // 2
+        
+        return df
+    
+    in_peaks = read_bed_with_summit(args.peaks)
+    in_nonpeaks = read_bed_with_summit(args.nonpeaks)
 
     assert(in_peaks.shape[0] != 0)
     assert(in_nonpeaks.shape[0] !=0)
