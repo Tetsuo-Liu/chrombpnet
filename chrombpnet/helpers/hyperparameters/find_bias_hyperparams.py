@@ -6,6 +6,9 @@ import numpy as np
 import os
 import json
 import chrombpnet.helpers.hyperparameters.param_utils as param_utils
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
+import itertools
 
 def parse_data_args():
     parser=argparse.ArgumentParser(description="find hyper-parameters for chrombpnet defined in src/training/models/chrombpnet_with_bias_model.py")
@@ -17,6 +20,7 @@ def parse_data_args():
     parser.add_argument("-oth", "--outlier-threshold", type=float, default=0.9999, help="threshold to use to filter outlies")
     parser.add_argument("-j", "--max-jitter", type=int, default=50, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
     parser.add_argument("-fl", "--chr-fold-path", type=str, required=True, help="Fold information - dictionary with test,valid and train keys and values with corresponding chromosomes")
+    parser.add_argument("--jobs", type=int, default=None, help="Number of parallel jobs to use")
     return parser
 
 def parse_model_args(parser):
@@ -29,82 +33,92 @@ def parse_model_args(parser):
     args = parser.parse_args()
     return args
 
-def main(args):    
+def process_counts_worker(worker_args):
+    """
+    Worker function to process counts for a single chromosome.
+    """
+    regions_df, bigwig_path, genome_path, inputlen, outputlen = worker_args
+    
+    with pyBigWig.open(bigwig_path) as bw:
+        genome = pyfaidx.Fasta(genome_path)
+        counts, _ = param_utils.get_seqs_cts(genome, bw, regions_df, inputlen, outputlen)
+    
+    return counts
 
-    # read the fold information - we will evaluate hyperparams and filter outliers on the train+valid set 
-    # do nothing on the test set 
+def main(args):    
+    # read the fold information
     splits_dict=json.load(open(args.chr_fold_path))
     chroms_to_keep=splits_dict["train"]+splits_dict["valid"]
     test_chroms_to_keep=splits_dict["test"]
     print("evaluating hyperparameters on the following chromosomes",chroms_to_keep)
 
-    # read from bigwigs and fasta file
-    bw = pyBigWig.open(args.bigwig) 
-    genome = pyfaidx.Fasta(args.genome)
-
     # read peaks and non peaks    
-    in_peaks =  pd.read_csv(args.peaks,
-                           sep='\t',
-                           header=None,
-                           names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
-    in_nonpeaks =  pd.read_csv(args.nonpeaks,
-                           sep='\t',
-                           header=None,
-                           names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
+    in_peaks =  pd.read_csv(args.peaks, sep='\t', header=None, names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
+    in_nonpeaks =  pd.read_csv(args.nonpeaks, sep='\t', header=None, names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
 
-    assert(in_peaks.shape[0] != 0) # peaks file is empty
-    assert(in_nonpeaks.shape[0] !=0) # non peaks file is empty
-    assert(args.inputlen >= args.outputlen) # inputlen should be greater than the outputlen 
-                                            # inputlen and outlen are chosen based on the filters and dilations layers used
+    assert(in_peaks.shape[0] != 0)
+    assert(in_nonpeaks.shape[0] !=0)
+    assert(args.inputlen >= args.outputlen)
 
     # get train/valid peaks and test peaks seperately
-    peaks = in_peaks[(in_peaks["chr"].isin(chroms_to_keep))]
-    test_peaks = in_peaks[(in_peaks["chr"].isin(test_chroms_to_keep))]
+    peaks = in_peaks[in_peaks["chr"].isin(chroms_to_keep)]
+    test_peaks = in_peaks[in_peaks["chr"].isin(test_chroms_to_keep)]
+    nonpeaks = in_nonpeaks[in_nonpeaks["chr"].isin(chroms_to_keep)]
+    test_nonpeaks = in_nonpeaks[in_nonpeaks["chr"].isin(test_chroms_to_keep)]
 
-    nonpeaks = in_nonpeaks[(in_nonpeaks["chr"].isin(chroms_to_keep))]
-    test_nonpeaks = in_nonpeaks[(in_nonpeaks["chr"].isin(test_chroms_to_keep))]
+    # Edge filtering
+    with pyBigWig.open(args.bigwig) as bw:
+        nonpeaks = param_utils.filter_edge_regions(nonpeaks, bw, args.inputlen, peaks_bool=0)
+        test_nonpeaks = param_utils.filter_edge_regions(test_nonpeaks, bw, args.inputlen, peaks_bool=0)
+        peaks = param_utils.filter_edge_regions(peaks, bw, args.inputlen, peaks_bool=1)
+        test_peaks = param_utils.filter_edge_regions(test_peaks, bw, args.inputlen, peaks_bool=1)
 
-    # step 1 filtering: filter nonpeaks that are in the edges - prevents us from making the inputlen regions - do this for all train/test/valid   
-    nonpeaks = param_utils.filter_edge_regions(nonpeaks, bw, args.inputlen, peaks_bool=0)
-    test_nonpeaks = param_utils.filter_edge_regions(test_nonpeaks, bw, args.inputlen, peaks_bool=0)
+    # Parallelized count retrieval
+    if args.jobs is None:
+        n_jobs = min(cpu_count(), 8) # Limit to 8 cores by default
+    else:
+        n_jobs = args.jobs
+    print(f"Using {n_jobs} parallel jobs for count retrieval.")
 
-    peaks = param_utils.filter_edge_regions(peaks, bw, args.inputlen, peaks_bool=1)
-    test_peaks = param_utils.filter_edge_regions(test_peaks, bw, args.inputlen, peaks_bool=1)
+    with Pool(processes=n_jobs) as pool:
+        # Prepare arguments for peak counts
+        peak_worker_args = [(df, args.bigwig, args.genome, args.inputlen, args.outputlen) for _, df in peaks.groupby('chr')]
+        print(f"Processing {len(peak_worker_args)} chromosomes for peak counts...")
+        peak_results = list(tqdm(pool.imap(process_counts_worker, peak_worker_args), total=len(peak_worker_args), desc="Peak Counts"))
+        peak_cnts = np.concatenate(peak_results)
 
-    # step 2 filtering: filter nonpeaks that have counts less than a threshold_factor (minimum of peak counts)
-    peak_cnts, _ = param_utils.get_seqs_cts(genome, bw, peaks, args.inputlen, args.outputlen)
-    nonpeak_cnts, _ = param_utils.get_seqs_cts(genome, bw, nonpeaks, args.inputlen, args.outputlen)    
+        # Prepare arguments for non-peak counts
+        nonpeak_worker_args = [(df, args.bigwig, args.genome, args.inputlen, args.outputlen) for _, df in nonpeaks.groupby('chr')]
+        print(f"Processing {len(nonpeak_worker_args)} chromosomes for non-peak counts...")
+        nonpeak_results = list(tqdm(pool.imap(process_counts_worker, nonpeak_worker_args), total=len(nonpeak_worker_args), desc="Non-peak Counts"))
+        nonpeak_cnts = np.concatenate(nonpeak_results)
+
     assert(len(peak_cnts) == peaks.shape[0])
     assert(len(nonpeak_cnts) == nonpeaks.shape[0])
 
+    # Count-based filtering
     final_cnts = nonpeak_cnts
     counts_threshold = np.quantile(peak_cnts,0.01)*args.bias_threshold_factor
-    assert(counts_threshold > 0) # counts threshold is 0 - all non peaks will be filtered!
+    assert(counts_threshold > 0)
    
     final_cnts = final_cnts[final_cnts < counts_threshold]
-
     print("Upper bound counts cut-off for bias model training: ", counts_threshold)
     print("Number of nonpeaks after the upper-bount cut-off: ", len(final_cnts))
-    assert(len(final_cnts) > 0) # Upper bound cut-off is too stringent so there are no points left for training
+    assert(len(final_cnts) > 0)
 
-    # step 3 filtering: filter nonpeaks that are outliers in train and valid set - no filtering on test set
+    # Outlier filtering
     upper_thresh = np.quantile(final_cnts, args.outlier_threshold)
     lower_thresh = np.quantile(final_cnts, 1-args.outlier_threshold)
-
     nonpeaks = nonpeaks[(nonpeak_cnts<upper_thresh) & (nonpeak_cnts>lower_thresh)]
-
     print("Number of nonpeaks after applying upper-bound cut-off and removing outliers : ", nonpeaks.shape[0])
 
     # combine train valid and test peak set and store them in a new file
-    frames = [nonpeaks, test_nonpeaks]
-    all_nonpeaks = pd.concat(frames)
-    all_nonpeaks.to_csv("{}filtered.bias_nonpeaks.bed".format(args.output_prefix), sep="\t", header=False, index=False)
+    all_nonpeaks = pd.concat([nonpeaks, test_nonpeaks])
+    all_nonpeaks.to_csv(f"{args.output_prefix}filtered.bias_nonpeaks.bed", sep="\t", header=False, index=False)
+    all_peaks = pd.concat([peaks, test_peaks])
+    all_peaks.to_csv(f"{args.output_prefix}filtered.bias_peaks.bed", sep="\t", header=False, index=False)
 
-    frames = [peaks, test_peaks]
-    all_peaks = pd.concat(frames)
-    all_peaks.to_csv("{}filtered.bias_peaks.bed".format(args.output_prefix), sep="\t", header=False, index=False)
-
-    # find counts loss weight for model training - using train and validation set
+    # find counts loss weight for model training
     counts_loss_weight = np.median(final_cnts[(final_cnts < upper_thresh) & (final_cnts>lower_thresh)])/10
     print("counts_loss_weight:", counts_loss_weight)
     assert(counts_loss_weight != 0)
@@ -113,38 +127,23 @@ def main(args):
         counts_loss_weight = 1.0
         print("WARNING: you are training on low-read depth data")
 
-    # store the parameters being used  - in a TSV file
-    file = open("{}bias_data_params.tsv".format(args.output_prefix),"w")
-    file.write("\t".join(["counts_sum_min_thresh", str(round(lower_thresh,2))]))
-    file.write("\n")
-    file.write("\t".join(["counts_sum_max_thresh", str(round(upper_thresh,2))]))
-    file.write("\n")
-    file.write("\t".join(["trainings_pts_post_thresh", str(sum((final_cnts<upper_thresh) & (final_cnts>lower_thresh)))]))
-    file.write("\n")
-    file.close()
+    # store the parameters being used
+    with open(f"{args.output_prefix}bias_data_params.tsv", "w") as f:
+        f.write(f"counts_sum_min_thresh\t{round(lower_thresh,2)}\n")
+        f.write(f"counts_sum_max_thresh\t{round(upper_thresh,2)}\n")
+        f.write(f"trainings_pts_post_thresh\t{sum((final_cnts<upper_thresh) & (final_cnts>lower_thresh))}\n")
 
-    file = open("{}bias_model_params.tsv".format(args.output_prefix),"w")
-    file.write("\t".join(["counts_loss_weight", str(round(counts_loss_weight,2))]))
-    file.write("\n")
-    file.write("\t".join(["filters", str(args.filters)]))
-    file.write("\n")
-    file.write("\t".join(["n_dil_layers", str(args.n_dilation_layers)]))
-    file.write("\n")
-    file.write("\t".join(["inputlen", str(args.inputlen)]))
-    file.write("\n")
-    file.write("\t".join(["outputlen", str(args.outputlen)]))
-    file.write("\n")
-    file.write("\t".join(["max_jitter", str(args.max_jitter)]))
-    file.write("\n")
-    file.write("\t".join(["chr_fold_path", str(args.chr_fold_path)]))
-    file.write("\n")
-    file.write("\t".join(["negative_sampling_ratio", str(1.0)])) # this is just a dummy variable because the train.py pipeline needs it - all negatives will be used for bias model training
-    file.close()
-
+    with open(f"{args.output_prefix}bias_model_params.tsv", "w") as f:
+        f.write(f"counts_loss_weight\t{round(counts_loss_weight,2)}\n")
+        f.write(f"filters\t{args.filters}\n")
+        f.write(f"n_dil_layers\t{args.n_dilation_layers}\n")
+        f.write(f"inputlen\t{args.inputlen}\n")
+        f.write(f"outputlen\t{args.outputlen}\n")
+        f.write(f"max_jitter\t{args.max_jitter}\n")
+        f.write(f"chr_fold_path\t{args.chr_fold_path}\n")
+        f.write("negative_sampling_ratio\t1.0\n")
 
 if __name__=="__main__":
-    # read the arguments
     parser = parse_data_args()
     args = parse_model_args(parser)
-
     main(args)
