@@ -33,16 +33,31 @@ def parse_model_args(parser):
     args = parser.parse_args()
     return args
 
+# Global variables for worker processes
+genome_obj = None
+bw_obj = None
+
+def worker_init(genome_path, bigwig_path):
+    """
+    Initialize genome and bigwig objects once per worker process.
+    This avoids multiprocessing deadlock from simultaneous file access.
+    """
+    global genome_obj, bw_obj
+    import pyfaidx
+    import pyBigWig
+    
+    genome_obj = pyfaidx.Fasta(genome_path)
+    bw_obj = pyBigWig.open(bigwig_path)
+
 def process_counts_worker(worker_args):
     """
     Worker function to process counts for a single chromosome.
+    Uses pre-initialized global objects to avoid file access conflicts.
     """
-    regions_df, bigwig_path, genome_path, inputlen, outputlen = worker_args
+    regions_df, inputlen, outputlen = worker_args
+    global genome_obj, bw_obj
     
-    with pyBigWig.open(bigwig_path) as bw:
-        genome = pyfaidx.Fasta(genome_path)
-        counts, _ = param_utils.get_seqs_cts(genome, bw, regions_df, inputlen, outputlen)
-    
+    counts, _ = param_utils.get_seqs_cts(genome_obj, bw_obj, regions_df, inputlen, outputlen)
     return counts
 
 def main(args):    
@@ -102,15 +117,15 @@ def main(args):
         n_jobs = args.jobs
     print(f"Using {n_jobs} parallel jobs for count retrieval.")
 
-    with Pool(processes=n_jobs) as pool:
-        # Prepare arguments for peak counts
-        peak_worker_args = [(df, args.bigwig, args.genome, args.inputlen, args.outputlen) for _, df in peaks.groupby('chr')]
+    with Pool(processes=n_jobs, initializer=worker_init, initargs=(args.genome, args.bigwig)) as pool:
+        # Prepare arguments for peak counts (removed bigwig_path and genome_path since they're now global)
+        peak_worker_args = [(df, args.inputlen, args.outputlen) for _, df in peaks.groupby('chr')]
         print(f"Processing {len(peak_worker_args)} chromosomes for peak counts...")
         peak_results = list(tqdm(pool.imap(process_counts_worker, peak_worker_args), total=len(peak_worker_args), desc="Peak Counts"))
         peak_cnts = np.concatenate(peak_results)
 
-        # Prepare arguments for non-peak counts
-        nonpeak_worker_args = [(df, args.bigwig, args.genome, args.inputlen, args.outputlen) for _, df in nonpeaks.groupby('chr')]
+        # Prepare arguments for non-peak counts (removed bigwig_path and genome_path since they're now global)
+        nonpeak_worker_args = [(df, args.inputlen, args.outputlen) for _, df in nonpeaks.groupby('chr')]
         print(f"Processing {len(nonpeak_worker_args)} chromosomes for non-peak counts...")
         nonpeak_results = list(tqdm(pool.imap(process_counts_worker, nonpeak_worker_args), total=len(nonpeak_worker_args), desc="Non-peak Counts"))
         nonpeak_cnts = np.concatenate(nonpeak_results)
