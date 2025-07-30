@@ -42,7 +42,7 @@ def read_parser():
         footprints_parser = subparsers.add_parser("footprints", help="Get marginal footprinting for given model and given motifs")
         #variants_parser = subparsers.add_parser("snp_score", help="Score SNPs with model")
 
-        def general_training_args(required_train, optional_train):
+        def general_training_args(required_train, optional_train, is_bias_model=False):
 		
         	required_train.add_argument('-g','--genome', required=True, type=str, help="reference genome fasta file")
        		required_train.add_argument('-c', '--chrom-sizes', type=str, required=True, help="Chrom sizes file")
@@ -50,6 +50,8 @@ def read_parser():
        		group.add_argument('-ibam', '--input-bam-file', type=str, help="Input BAM file")
         	group.add_argument('-ifrag', '--input-fragment-file', type=str, help="Input fragment file")
         	group.add_argument('-itag', '--input-tagalign-file', type=str, help="Input tagAlign file")
+        	if is_bias_model:
+        		group.add_argument('-ibw', '--input-bigwig', type=str, help="Input bigWig file, bypasses fragment processing")
         	required_train.add_argument('-o', '--output-dir', type=str, required=True, help="Output dir (path/to/output/dir)")
         	required_train.add_argument('-d', '--data-type', required=True, type=str, choices=['ATAC', 'DNASE'], help="assay type")
         	required_train.add_argument("-p", "--peaks", type=str, required=True, help="10 column bed file of peaks. Sequences and labels will be extracted centered at start (2nd col) + summit (10th col).")
@@ -113,7 +115,7 @@ def read_parser():
         required_main_parser = train_parser.add_argument_group('required arguments')
         optional_main_parser = train_parser.add_argument_group('optional arguments')
         
-        required_main_parser,optional_main_parser = general_training_args(required_main_parser, optional_main_parser)
+        required_main_parser,optional_main_parser = general_training_args(required_main_parser, optional_main_parser, is_bias_model=False)
         
         required_main_parser.add_argument("-b", "--bias-model-path", type=str, required=True, help="Path for a pretrained bias model")
 
@@ -129,7 +131,7 @@ def read_parser():
         required_pipeline_parser = pipeline_parser.add_argument_group('required arguments')
         optional_pipeline_parser = pipeline_parser.add_argument_group('optional arguments')
         
-        required_pipeline_parser,optional_pipeline_parser = general_training_args(required_pipeline_parser, optional_pipeline_parser)
+        required_pipeline_parser,optional_pipeline_parser = general_training_args(required_pipeline_parser, optional_pipeline_parser, is_bias_model=False)
         
         required_pipeline_parser.add_argument("-b", "--bias-model-path", type=str, required=True, help="Path for a pretrained bias model")
 
@@ -165,7 +167,7 @@ def read_parser():
         bias_parser._action_groups.pop()
         required_bias_parser = bias_parser.add_argument_group('required arguments')
         optional_bias_parser = bias_parser.add_argument_group('optional arguments')
-        required_bias_parser,optional_bias_parser = general_training_args(required_bias_parser, optional_bias_parser)
+        required_bias_parser,optional_bias_parser = general_training_args(required_bias_parser, optional_bias_parser, is_bias_model=True)
         
         required_bias_parser.add_argument("-b", "--bias-threshold-factor", type=float, required=True, help="A threshold is applied on maximum count of non-peak region for training bias model, which is set as this threshold x min(count over peak regions). Recommended start value 0.5 for ATAC and 0.8 for DNase.")
 
@@ -173,13 +175,14 @@ def read_parser():
         optional_bias_parser.add_argument("-dil", "--n-dilation-layers", type=int, default=4, help="Number of dilation layers to use in chrombpnet model")
         optional_bias_parser.add_argument("-j", "--max-jitter", type=int, default=0, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
         optional_bias_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
+        optional_bias_parser.add_argument("--jobs", type=int, default=None, help="Number of parallel jobs for hyperparameter calculation")
 
        # bias model training arguments
 
         bias_parser_train._action_groups.pop()
         required_biast_parser = bias_parser_train.add_argument_group('required arguments')
         optional_biast_parser = bias_parser_train.add_argument_group('optional arguments')
-        required_biast_parser,optional_biast_parser = general_training_args(required_biast_parser, optional_biast_parser)
+        required_biast_parser,optional_biast_parser = general_training_args(required_biast_parser, optional_biast_parser, is_bias_model=True)
         
         required_biast_parser.add_argument("-b", "--bias-threshold-factor", type=float, required=True, help="A threshold is applied on maximum count of non-peak region for training bias model, which is set as this threshold x min(count over peak regions). Recommended start value 0.5 for ATAC and 0.8 for DNas")
 
@@ -259,8 +262,7 @@ def read_parser():
         required_ftps.add_argument("-pwm_f", "--motifs-to-pwm", type=str, required=True, help="Path to a TSV file containing motifs in first column and motif string to use for footprinting in second column")    
         
         optional_ftps.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for prediction")
-        optional_ftps.add_argument("--ylim",default=None,type=tuple, required=False,help="lower and upper y-limits for plotting the motif footprint, in the form of a tuple i.e. \
-        (0,0.8). If this is set to None, ylim will be autodetermined.")
+        optional_ftps.add_argument("--ylim",default=None,type=tuple, required=False,help="lower and upper y-limits for plotting the motif footprint, in the form of a tuple i.e. \n        (0,0.8). If this is set to None, ylim will be autodetermined.")
   
         # Do variant scoring
         
@@ -296,4 +298,3 @@ def read_parser():
         args = parser.parse_args()
 
         return args
-
