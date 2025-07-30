@@ -43,17 +43,49 @@ def get_seqs_cts(genome, bw, peaks_df, input_width=2114, output_width=1000):
     """
     Output counts (not log counts)
     Output one-hot encoded sequence
+    OPTIMIZED VERSION: Load chromosome sequences in memory to avoid I/O bottleneck
     """
+    if len(peaks_df) == 0:
+        return (np.array([]), one_hot.dna_to_one_hot([]))
+    
+    # Group by chromosome to minimize genome object access
+    chrom_sequences = {}
+    
     vals = []
     seqs = []
-    for i, r in peaks_df.iterrows():
-        sequence = str(genome[r['chr']][(r['start']+r['summit'] - input_width//2):(r['start'] + r['summit'] + input_width//2)])
-        seqs.append(sequence)
-        bigwig_vals=np.nan_to_num(bw.values(r['chr'], 
-                            (r['start'] + r['summit']) - output_width//2,
-                            (r['start'] + r['summit']) + output_width//2))
-        vals.append(bigwig_vals)
-    return (np.sum(np.array(vals),axis=1), one_hot.dna_to_one_hot(seqs))
+    
+    # Process each chromosome's peaks in batch
+    for chrom in peaks_df['chr'].unique():
+        chrom_peaks = peaks_df[peaks_df['chr'] == chrom]
+        
+        # Load entire chromosome sequence into memory once per chromosome
+        if chrom not in chrom_sequences:
+            chrom_sequences[chrom] = str(genome[chrom][:]).upper()
+        
+        chrom_seq = chrom_sequences[chrom]
+        
+        # Process all peaks for this chromosome
+        for _, row in chrom_peaks.iterrows():
+            # Calculate coordinates (same logic as original)
+            seq_start = int(row['start'] + row['summit'] - input_width // 2)
+            seq_end = int(row['start'] + row['summit'] + input_width // 2)
+            val_start = int(row['start'] + row['summit'] - output_width // 2)
+            val_end = int(row['start'] + row['summit'] + output_width // 2)
+            
+            # Extract sequence from in-memory chromosome (major optimization)
+            if seq_start >= 0 and seq_end <= len(chrom_seq):
+                sequence = chrom_seq[seq_start:seq_end]
+            else:
+                # Handle edge case with padding (maintain original behavior)
+                sequence = str(genome[chrom][seq_start:seq_end])
+            
+            seqs.append(sequence)
+            
+            # Get bigwig values (this is still I/O bound but unavoidable)
+            bigwig_vals = np.nan_to_num(bw.values(chrom, val_start, val_end))
+            vals.append(bigwig_vals)
+    
+    return (np.sum(np.array(vals), axis=1), one_hot.dna_to_one_hot(seqs))
 
 def load_model_wrapper(model_h5):
     # read .h5 model
