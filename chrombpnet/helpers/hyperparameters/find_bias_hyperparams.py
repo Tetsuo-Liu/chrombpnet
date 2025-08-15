@@ -112,7 +112,11 @@ def main(args):
 
     # Parallelized count retrieval
     if args.jobs is None:
-        n_jobs = min(cpu_count(), 8) # Limit to 8 cores by default
+        # Use 75% of available cores for optimal performance while maintaining system stability
+        # Leave 25% for system processes and other tasks
+        max_safe_cores = max(1, int(cpu_count() * 0.75))
+        # Cap at reasonable number of chromosomes (typically ~23 for human genome)
+        n_jobs = min(max_safe_cores, 23)
     else:
         n_jobs = args.jobs
     print(f"Using {n_jobs} parallel jobs for count retrieval.")
@@ -135,7 +139,20 @@ def main(args):
 
     # Count-based filtering
     final_cnts = nonpeak_cnts
+    
+    # DEBUG: Print detailed information about peak counts
+    print(f"DEBUG: peak_cnts shape: {peak_cnts.shape}")
+    print(f"DEBUG: peak_cnts sum: {np.sum(peak_cnts)}")
+    print(f"DEBUG: peak_cnts min: {np.min(peak_cnts)}")
+    print(f"DEBUG: peak_cnts max: {np.max(peak_cnts)}")
+    print(f"DEBUG: peak_cnts non-zero count: {np.sum(peak_cnts > 0)}")
+    print(f"DEBUG: peak_cnts mean: {np.mean(peak_cnts)}")
+    print(f"DEBUG: First 10 peak_cnts values: {peak_cnts[:10]}")
+    print(f"DEBUG: 1% quantile of peak_cnts: {np.quantile(peak_cnts, 0.01)}")
+    print(f"DEBUG: bias_threshold_factor: {args.bias_threshold_factor}")
+    
     counts_threshold = np.quantile(peak_cnts,0.01)*args.bias_threshold_factor
+    print(f"DEBUG: counts_threshold = {np.quantile(peak_cnts,0.01)} * {args.bias_threshold_factor} = {counts_threshold}")
     assert(counts_threshold > 0)
    
     final_cnts = final_cnts[final_cnts < counts_threshold]
