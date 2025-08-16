@@ -9,9 +9,51 @@ import pandas as pd
 import os
 import json
 import numpy as np
+import tensorflow as tf
 
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
 os.environ['PYTHONHASHSEED'] = '0'
+
+def create_tf_compatible_dataset(sequence_generator):
+    """
+    Create TensorFlow compatible dataset from ChromBPNetBatchGenerator.
+    Uses feature detection instead of version checking for better reliability.
+    """
+    # Test if current TensorFlow requires explicit output_signature
+    def test_generator():
+        import numpy as np
+        batch_seq = np.zeros((1, sequence_generator.inputlen, 4), dtype=np.float32)
+        batch_cts = np.zeros((1, sequence_generator.outputlen), dtype=np.float32)
+        yield (batch_seq, (batch_cts, np.zeros((1, 1), dtype=np.float32)))
+    
+    # Try to create dataset without explicit output_signature
+    try:
+        test_dataset = tf.data.Dataset.from_generator(test_generator)
+        # If successful, use legacy approach
+        return sequence_generator
+    except (TypeError, ValueError):
+        # If failed, use explicit output_signature approach
+        pass
+    
+    # Use explicit Dataset conversion with output_signature
+    def generator_func():
+        for i in range(len(sequence_generator)):
+            yield sequence_generator[i]
+    
+    # Define explicit output signature based on generator properties
+    output_signature = (
+        tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
+        (
+            tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
+            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+        )
+    )
+    
+    dataset = tf.data.Dataset.from_generator(
+        generator_func,
+        output_signature=output_signature
+    )
+    return dataset.prefetch(tf.data.AUTOTUNE)
 
 def get_model(args, parameters):
     """
@@ -36,8 +78,12 @@ def fit_and_evaluate(model,train_gen,valid_gen,args,architecture_module):
     #reduce_lr = tfcallbacks.ReduceLROnPlateau(monitor='val_loss',factor=0.4, patience=args.early_stop-2, min_lr=0.00000001)
     cur_callbacks=[checkpointer,earlystopper,csvlogger,history]
 
-    model.fit(train_gen,
-              validation_data=valid_gen,
+    # Convert generators to TF 2.20+ compatible format if needed
+    train_data = create_tf_compatible_dataset(train_gen)
+    valid_data = create_tf_compatible_dataset(valid_gen)
+    
+    model.fit(train_data,
+              validation_data=valid_data,
               epochs=args.epochs,
               verbose=1,
               callbacks=cur_callbacks)
