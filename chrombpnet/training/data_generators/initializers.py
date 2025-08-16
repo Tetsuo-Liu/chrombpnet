@@ -1,5 +1,6 @@
 import chrombpnet.training.data_generators.batchgen_generator as batchgen_generator
 from chrombpnet.training.utils import data_utils
+from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 import pandas as pd
 import json
 
@@ -66,12 +67,12 @@ def initialize_generators(args, mode, parameters, return_coords):
 
     if args.peaks.lower() != "none":
         print("loading peaks...")
-        peak_regions=pd.read_csv(args.peaks,header=None,sep='\t',names=NARROWPEAK_SCHEMA)
+        peak_regions=read_bed_with_summit(args.peaks)
         peak_regions, chroms=get_bed_regions_for_fold_split(peak_regions, mode, splits_dict)
 
     if args.nonpeaks.lower() != "none":
         print("loading nonpeaks...")
-        nonpeak_regions=pd.read_csv(args.nonpeaks,header=None,sep='\t',names=NARROWPEAK_SCHEMA)
+        nonpeak_regions=read_bed_with_summit(args.nonpeaks)
         nonpeak_regions, chroms=get_bed_regions_for_fold_split(nonpeak_regions, mode, splits_dict) 
 
     inputlen, outputlen, \
