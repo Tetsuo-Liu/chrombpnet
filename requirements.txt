@@ -1,20 +1,21 @@
-# TensorFlowはすでにwheelでインストール済みのため削除
-# numpy, pandasなどは互換性のある最新版が自動で入るようにバージョン指定を削除
-h5py
-matplotlib
-matplotlib-venn
-numpy
-pandas
-pyfaidx
-scikit-learn
-scipy
-# tensorflow-probabilityはTensorFlow本体との互換性が重要なので、一旦削除してpipに解決させる
-protobuf
-tqdm
-deepdish
-deeplift
-modisco
-modisco-lite
-weasyprint
-kundajelab-shap
+h5py>=2.10.0
+matplotlib>=3.3.1
+matplotlib-venn==0.11.6
+numpy==1.23.4
+pandas>=1.3.4
+pyfaidx==0.6.1
+scikit-learn>=1.1.2
+scipy>=1.4.1
+tensorflow==2.8.0 
+tensorflow-estimator==2.8.0 
+tensorflow-probability==0.15.0
+protobuf==3.20
+tqdm==4.48.2
+deepdish==0.3.7
+deeplift==0.6.13.0
+modisco==0.5.16.0
+modisco-lite==2.0.7
+weasyprint==52.5
+kundajelab-shap==1
+#shap @ git+https://github.com/kundajelab/shap@master#egg=shap
 
