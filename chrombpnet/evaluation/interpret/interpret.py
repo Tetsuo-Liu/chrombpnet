@@ -13,6 +13,7 @@ import os
 import argparse
 import chrombpnet.evaluation.interpret.shap_utils as shap_utils
 import chrombpnet.evaluation.interpret.input_utils as input_utils
+from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
 
@@ -108,7 +109,7 @@ def main(args):
     with open("{}.interpret.args.json".format(args.output_prefix), "w") as fp:
         json.dump(vars(args), fp, ensure_ascii=False, indent=4)
 
-    regions_df = pd.read_csv(args.regions, sep='\t', names=NARROWPEAK_SCHEMA)
+    regions_df = read_bed_with_summit(args.regions)
 
     if args.debug_chr:
         regions_df = regions_df[regions_df['chr'].isin(args.debug_chr)]

@@ -17,6 +17,7 @@ from chrombpnet.training.utils.data_utils import get_seq as get_seq
 import chrombpnet.training.utils.one_hot as one_hot
 from tensorflow.keras.utils import get_custom_objects
 from tensorflow.keras.models import load_model
+from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 
 
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
@@ -92,7 +93,7 @@ def main(args):
 	splits_dict = json.load(open(args.chr_fold_path))
 	chroms_to_keep = set(splits_dict["test"])
 
-	regions_df = pd.read_csv(args.regions, sep='\t', names=NARROWPEAK_SCHEMA)
+	regions_df = read_bed_with_summit(args.regions)
 	regions_subsample = regions_df[(regions_df["chr"].isin(chroms_to_keep))]
 	regions_seqs = get_seq(regions_subsample, genome_fasta, inputlen)
 

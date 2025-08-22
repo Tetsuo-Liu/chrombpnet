@@ -12,6 +12,7 @@ import chrombpnet.training.utils.data_utils as data_utils
 import chrombpnet.training.utils.one_hot as one_hot
 import h5py
 import json
+from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
 
@@ -130,7 +131,7 @@ def main(args):
         outputlen = int(model_chrombpnet_nb.output_shape[0][1])
 
         # load data
-        regions_df = pd.read_csv(args.regions, sep='\t', names=NARROWPEAK_SCHEMA)
+        regions_df = read_bed_with_summit(args.regions)
         print(regions_df.head())
         with pyfaidx.Fasta(args.genome) as g:
             seqs, regions_used = bigwig_helper.get_seq(regions_df, g, inputlen)
@@ -170,7 +171,7 @@ def main(args):
         outputlen = int(model_chrombpnet.output_shape[0][1])
 
         # load data
-        regions_df = pd.read_csv(args.regions, sep='\t', names=NARROWPEAK_SCHEMA)
+        regions_df = read_bed_with_summit(args.regions)
         print(regions_df.head())
         with pyfaidx.Fasta(args.genome) as g:
             seqs, regions_used = bigwig_helper.get_seq(regions_df, g, inputlen)
@@ -210,7 +211,7 @@ def main(args):
         outputlen = int(model_bias.output_shape[0][1])
 
         # load data
-        regions_df = pd.read_csv(args.regions, sep='\t', names=NARROWPEAK_SCHEMA)
+        regions_df = read_bed_with_summit(args.regions)
         print(regions_df.head())
         with pyfaidx.Fasta(args.genome) as g:
             seqs, regions_used = bigwig_helper.get_seq(regions_df, g, inputlen)
