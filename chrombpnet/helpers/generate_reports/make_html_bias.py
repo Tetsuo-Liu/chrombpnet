@@ -192,21 +192,30 @@ def qc_report(fpx,prefix):
 		'''
 			
 	return html
-	
-def main(args):
 
-	if args.file_prefix:
-		fpx = args.file_prefix+"_"
+def generate_bias_report(input_dir, file_prefix=None, command="pipeline", html_prefix="./"):
+	"""
+	Core bias report generation logic extracted from main().
+	
+	Args:
+		input_dir: Directory path containing bias pipeline output
+		file_prefix: Optional file prefix for outputs
+		command: Report type ("pipeline", "train", "qc")
+		html_prefix: HTML file prefix
+		
+	Returns:
+		dict: Information about generated report files
+	"""
+	if file_prefix:
+		fpx = file_prefix + "_"
 	else:
 		fpx = ""
 		
-	#prefix = "/home/anusri/full_run_tes/bias_model/"
-	prefix = args.input_dir
-	pd.set_option('colheader_justify', 'center')   # FOR TABLE <th>
+	prefix = input_dir
+	pd.set_option('colheader_justify', 'center')
 
-
-	if (args.command=="pipeline"):
-		page_title_text='Bias model training and quality check report'
+	if command == "pipeline":
+		page_title_text = 'Bias model training and quality check report'
 		main_html = f'''
 		<html>
 			<head>
@@ -226,11 +235,11 @@ def main(args):
 			    </style>
 			</body>
 			'''
-		main_html += train_report(fpx,prefix)
-		main_html += qc_report(fpx,prefix)
+		main_html += train_report(fpx, prefix)
+		main_html += qc_report(fpx, prefix)
 
-	if (args.command=="train"):
-		page_title_text='Bias model training report'
+	if command == "train":
+		page_title_text = 'Bias model training report'
 		main_html = f'''
 		<html>
 			<head>
@@ -250,10 +259,10 @@ def main(args):
 			    </style>
 			</body>
 			'''
-		main_html += train_report(fpx,prefix)
+		main_html += train_report(fpx, prefix)
 
-	if (args.command=="qc"):
-		page_title_text='Bias model quality check report'
+	if command == "qc":
+		page_title_text = 'Bias model quality check report'
 		main_html = f'''
 		<html>
 			<head>
@@ -273,20 +282,20 @@ def main(args):
 			    </style>
 			</body>
 			'''
-		main_html += qc_report(fpx,prefix)
-	
+		main_html += qc_report(fpx, prefix)
 	
 	end_html = f'''
 	</html>
 		'''	
 		
-	main_html+=end_html
-	# 3. Write the html string as an HTML file
-	#with open('html_report.html', 'w') as f:
-	#	f.write(html.format(bias_image=bias_image_loc, loss_image_loc=loss_image_loc))
-	with open(os.path.join(prefix,"evaluation/{}overall_report.html".format(fpx)), 'w') as f:
+	main_html += end_html
+	
+	# Write HTML report
+	html_path = os.path.join(prefix, "evaluation/{}overall_report.html".format(fpx))
+	with open(html_path, 'w') as f:
 		f.write(main_html)
 
+	# Generate PDF
 	from weasyprint import HTML, CSS
 	css = CSS(string='''
 		@page {
@@ -314,11 +323,30 @@ def main(args):
  			   border: 1px solid silver;
 			}
         ''')
-	#HTML('html_report.html').write_pdf('html_report.pdf', stylesheets=[css])
-	HTML(os.path.join(prefix,"evaluation/{}overall_report.html".format(fpx))).write_pdf(os.path.join(prefix,"evaluation/{}overall_report.pdf".format(fpx)), stylesheets=[css])
+	
+	pdf_path = os.path.join(prefix, "evaluation/{}overall_report.pdf".format(fpx))
+	HTML(html_path).write_pdf(pdf_path, stylesheets=[css])
 
-	with open(os.path.join(prefix,"evaluation/{}overall_report.html".format(fpx)), 'w') as f:
-		f.write(main_html.replace("./",args.html_prefix))
+	# Update HTML with prefix
+	with open(html_path, 'w') as f:
+		f.write(main_html.replace("./", html_prefix))
+	
+	return {
+		'html_path': html_path,
+		'pdf_path': pdf_path,
+		'command': command
+	}
+	
+def main(args):
+	"""Main function for command-line interface."""
+	
+	# Call core function with extracted parameters
+	generate_bias_report(
+		input_dir=args.input_dir,
+		file_prefix=args.file_prefix,
+		command=args.command,
+		html_prefix=args.html_prefix
+	)
 	
 if __name__=="__main__":
 	args=read_args()
