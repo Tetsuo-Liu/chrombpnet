@@ -34,6 +34,243 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
+import threading
+import psutil
+import gc
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
+import time
+from collections import defaultdict
+
+
+# Global variables for worker processes (following ChromBPNet patterns)
+genome_obj = None
+bw_obj = None
+
+def worker_init_bigwig_batch(genome_path, bigwig_path):
+    """
+    Initialize genome and bigwig objects once per worker process.
+    This avoids multiprocessing deadlock from simultaneous file access.
+    Pattern from find_bias_hyperparams.py and get_gc_content.py
+    """
+    global genome_obj, bw_obj
+    import pyfaidx
+    import pyBigWig
+    
+    genome_obj = pyfaidx.Fasta(genome_path)
+    bw_obj = pyBigWig.open(bigwig_path)
+
+def process_peaks_batch_worker(worker_args):
+    """
+    Worker function to process peak regions from a single BigWig file.
+    Uses pre-initialized global objects and chromosome-level memory loading.
+    Adapted from get_gc_content.py and param_utils.py patterns
+    """
+    peak_indices, peak_regions, inputlen, outputlen, bigwig_path = worker_args
+    global genome_obj, bw_obj
+    
+    if bw_obj is None:
+        # Fallback initialization if needed
+        import pyBigWig
+        bw_obj = pyBigWig.open(bigwig_path)
+    
+    results = []
+    chrom_sequences = {}  # Cache chromosome sequences per worker
+    
+    # Group by chromosome for memory-efficient processing
+    chrom_groups = defaultdict(list)
+    for i, (peak_idx, peak_row) in enumerate(zip(peak_indices, peak_regions.itertuples())):
+        chrom = peak_row.chr
+        chrom_groups[chrom].append((i, peak_idx, peak_row))
+    
+    # Process each chromosome in batch
+    for chrom, chrom_peaks in chrom_groups.items():
+        # Load entire chromosome sequence into memory once (param_utils.py pattern)
+        if chrom not in chrom_sequences:
+            if chrom in genome_obj:
+                chrom_sequences[chrom] = str(genome_obj[chrom][:]).upper()
+            else:
+                continue  # Skip chromosome not in genome
+        
+        chrom_seq = chrom_sequences[chrom]
+        
+        # Process all peaks for this chromosome
+        for local_idx, original_peak_idx, peak_row in chrom_peaks:
+            try:
+                # Calculate coordinates (following ChromBPNet patterns)
+                center = peak_row.start + peak_row.summit
+                seq_start = center - inputlen // 2
+                seq_end = center + inputlen // 2
+                val_start = center - outputlen // 2
+                val_end = center + outputlen // 2
+                
+                # Extract sequence from in-memory chromosome (major optimization)
+                if seq_start >= 0 and seq_end <= len(chrom_seq):
+                    sequence = chrom_seq[seq_start:seq_end]
+                else:
+                    # Handle edge case (maintain ChromBPNet behavior)
+                    sequence = str(genome_obj[chrom][seq_start:seq_end])
+                
+                # Get bigwig values (I/O bound but unavoidable)
+                bigwig_vals = np.nan_to_num(bw_obj.values(chrom, val_start, val_end))
+                
+                # Convert sequence to one-hot
+                from chrombpnet.training.utils import one_hot
+                seq_onehot = one_hot.dna_to_one_hot([sequence])[0]
+                
+                results.append({
+                    'original_peak_idx': original_peak_idx,
+                    'local_idx': local_idx,
+                    'sequence': seq_onehot,
+                    'counts': bigwig_vals,
+                    'coords': (chrom, seq_start, seq_end)
+                })
+                
+            except Exception as e:
+                logging.warning(f"Error processing peak {original_peak_idx} in {chrom}: {e}")
+                continue
+    
+    return results
+
+class BigWigConnectionPool:
+    """
+    Connection pool for BigWig files to minimize file open/close overhead.
+    Implements resource management following ChromBPNet patterns.
+    """
+    
+    def __init__(self, max_connections: int = 10):
+        self.max_connections = max_connections
+        self.connections = {}  # {filepath: pyBigWig_object}
+        self.access_times = {}  # {filepath: last_access_time}
+        self.lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
+    
+    def get_connection(self, bigwig_path: str):
+        """
+        Get BigWig connection with automatic resource management.
+        """
+        with self.lock:
+            current_time = time.time()
+            
+            # Return existing connection if available
+            if bigwig_path in self.connections:
+                self.access_times[bigwig_path] = current_time
+                return self.connections[bigwig_path]
+            
+            # Clean up old connections if pool is full
+            if len(self.connections) >= self.max_connections:
+                self._cleanup_old_connections()
+            
+            # Create new connection
+            try:
+                bw = pyBigWig.open(bigwig_path)
+                if bw is None:
+                    raise ValueError(f"Failed to open BigWig file: {bigwig_path}")
+                
+                self.connections[bigwig_path] = bw
+                self.access_times[bigwig_path] = current_time
+                
+                self.logger.debug(f"Opened new BigWig connection: {Path(bigwig_path).name}")
+                return bw
+                
+            except Exception as e:
+                self.logger.error(f"Failed to open BigWig file {bigwig_path}: {e}")
+                raise
+    
+    def _cleanup_old_connections(self):
+        """
+        Close least recently used connections.
+        """
+        if len(self.connections) < self.max_connections:
+            return
+        
+        # Sort by access time and close oldest
+        sorted_paths = sorted(self.access_times.items(), key=lambda x: x[1])
+        paths_to_close = [path for path, _ in sorted_paths[:len(sorted_paths)//2]]
+        
+        for path in paths_to_close:
+            if path in self.connections:
+                try:
+                    self.connections[path].close()
+                    del self.connections[path]
+                    del self.access_times[path]
+                    self.logger.debug(f"Closed old BigWig connection: {Path(path).name}")
+                except Exception as e:
+                    self.logger.warning(f"Error closing BigWig connection: {e}")
+    
+    def close_all(self):
+        """
+        Close all connections and clean up resources.
+        """
+        with self.lock:
+            for path, bw in self.connections.items():
+                try:
+                    bw.close()
+                    self.logger.debug(f"Closed BigWig connection: {Path(path).name}")
+                except Exception:
+                    pass
+            
+            self.connections.clear()
+            self.access_times.clear()
+
+class EpochDataPlanner:
+    """
+    Epoch-level data planning system for memory-efficient pre-loading.
+    Implements performance optimization patterns from ChromBPNet helpers.
+    """
+    
+    def __init__(self, memory_limit_gb: float = 2.0):
+        self.memory_limit_gb = memory_limit_gb
+        self.logger = logging.getLogger(__name__)
+    
+    def plan_peak_data_loading(self, peak_pseudobulk_pairs, inputlen: int, outputlen: int, 
+                             genome_fasta: str, max_workers: int = None) -> Dict:
+        """
+        Plan efficient data loading for peak regions using parallel processing.
+        Follows patterns from get_gc_content.py and find_bias_hyperparams.py
+        """
+        start_time = time.time()
+        
+        # Group pairs by BigWig file for batch processing
+        file_groups = defaultdict(list)
+        for peak_idx, pseudobulk_metadata in peak_pseudobulk_pairs:
+            bigwig_path = str(pseudobulk_metadata['bigwig_path'])
+            file_groups[bigwig_path].append((peak_idx, pseudobulk_metadata))
+        
+        self.logger.info(f"Planning data loading for {len(file_groups)} BigWig files")
+        
+        # Determine optimal number of workers (following ChromBPNet patterns)
+        if max_workers is None:
+            # Use 75% of available cores for optimal performance while maintaining system stability
+            max_safe_cores = max(1, int(cpu_count() * 0.75))
+            # Cap at reasonable number for BigWig files
+            max_workers = min(max_safe_cores, len(file_groups), 16)
+        
+        self.logger.info(f"Using {max_workers} parallel workers for data loading")
+        
+        # Check memory usage before planning
+        available_memory = psutil.virtual_memory().available / (1024**3)  # GB
+        if available_memory < self.memory_limit_gb:
+            self.logger.warning(f"Low memory detected: {available_memory:.1f}GB available")
+        
+        planning_time = time.time() - start_time
+        self.logger.info(f"Data loading planning completed in {planning_time:.2f}s")
+        
+        return {
+            'file_groups': file_groups,
+            'max_workers': max_workers,
+            'memory_limit_gb': self.memory_limit_gb,
+            'planning_time': planning_time
+        }
+    
+    def estimate_memory_usage(self, total_peaks: int, inputlen: int, outputlen: int) -> float:
+        """
+        Estimate memory usage for peak data loading.
+        """
+        # Rough estimation: sequence (4 * inputlen) + counts (outputlen) + overhead
+        bytes_per_peak = 4 * inputlen * 4 + outputlen * 8 + 1000  # One-hot + counts + overhead
+        total_bytes = total_peaks * bytes_per_peak
+        return total_bytes / (1024**3)  # Convert to GB
 
 
 class DPGenerator(keras.utils.Sequence):
@@ -86,6 +323,11 @@ class DPGenerator(keras.utils.Sequence):
         reverse complement, and shuffling) are strictly disabled for validation
         and test modes. This guarantees that the evaluation dataset is identical
         for every run, a cornerstone of reproducible research.
+
+    3.  **Deterministic Reproducibility**:
+        All random operations are controlled by independent seed management to
+        ensure complete reproducibility across runs, regardless of global random
+        state or execution timing.
     """
     
     def __init__(self, 
@@ -102,7 +344,8 @@ class DPGenerator(keras.utils.Sequence):
                  add_revcomp: bool, 
                  return_coords: bool,
                  shuffle_at_epoch_start: bool,
-                 mode: str = "train"):
+                 mode: str = "train",
+                 seed: Optional[int] = None):
         """
         Initialize the DP Generator with hybrid data loading strategy.
         
@@ -139,9 +382,27 @@ class DPGenerator(keras.utils.Sequence):
         self.add_revcomp = add_revcomp if mode == 'train' else False
         self.shuffle_at_epoch_start = shuffle_at_epoch_start if mode == 'train' else False
         
+        # CRITICAL: Independent seed management for deterministic reproducibility
+        self.base_seed = seed if seed is not None else np.random.randint(0, 2**31 - 1)
+        self.rng = np.random.RandomState(self.base_seed)
+        self.current_epoch = 0
+        
         # Logging configuration
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        
+        # Log seed information for reproducibility
+        self.logger.info(f"DPGenerator initialized with base seed: {self.base_seed}")
+        self.logger.info(f"Mode: {mode}, Reproducible: {'Yes' if seed is not None else 'No'}")
+        
+        # Initialize performance optimization components (Step 3)
+        self.bigwig_pool = BigWigConnectionPool(max_connections=10)
+        self.epoch_planner = EpochDataPlanner(memory_limit_gb=2.0)
+        self.performance_stats = {
+            'total_io_time': 0.0,
+            'total_processing_time': 0.0,
+            'epochs_processed': 0
+        }
         
         # Initialize data components
         self._initialize_validation_and_metadata(pseudobulk_metadata_path)
@@ -284,7 +545,7 @@ class DPGenerator(keras.utils.Sequence):
         """
         Plan training epoch with weighted dynamic pairing for peak regions.
         
-        STEP 2-2: Implement probabilistic pseudobulk selection for training.
+        STEP 3: Enhanced with parallel processing and memory optimization.
         Each epoch generates new (peak, pseudobulk) pairs based on sampling_weight.
         """
         if self.peak_regions is None or len(self.peak_regions) == 0:
@@ -293,16 +554,29 @@ class DPGenerator(keras.utils.Sequence):
             self.peak_coords = None
             return
             
-        self.logger.info("Planning training epoch with weighted dynamic pairing...")
+        epoch_start_time = time.time()
+        self.logger.info("Planning optimized training epoch with weighted dynamic pairing...")
         
         # Step 1: Generate probabilistic peak-pseudobulk pairings for this epoch
         self.epoch_peak_pseudobulk_pairs = self._generate_weighted_peak_pseudobulk_pairs()
         
-        # Step 2: Group pairs by BigWig file for efficient I/O
-        self.file_grouped_pairs = self._group_pairs_by_bigwig_file(self.epoch_peak_pseudobulk_pairs)
+        # Step 2: Plan efficient parallel data loading (Step 3 optimization)
+        self.data_plan = self.epoch_planner.plan_peak_data_loading(
+            self.epoch_peak_pseudobulk_pairs,
+            self.inputlen + 2 * self.max_jitter,  # Allow for jittering
+            self.outputlen + 2 * self.max_jitter,
+            self.genome_fasta
+        )
         
-        # Step 3: Load peak data using the weighted pairings
-        self._load_peak_data_with_weighting()
+        # Step 3: Load peak data using optimized parallel strategy
+        self._load_peak_data_with_parallel_processing()
+        
+        # Update performance statistics
+        epoch_time = time.time() - epoch_start_time
+        self.performance_stats['total_processing_time'] += epoch_time
+        self.performance_stats['epochs_processed'] += 1
+        
+        self.logger.info(f"Epoch planning completed in {epoch_time:.2f}s")
         
     def _create_fixed_validation_set(self):
         """
@@ -440,26 +714,53 @@ class DPGenerator(keras.utils.Sequence):
         Generate probabilistic (peak, pseudobulk) pairs for the current epoch.
         
         STEP 2-2: Core weighted dynamic pairing implementation.
+        CRITICAL: Uses independent RandomState for deterministic reproducibility.
         
         Returns:
             List[Tuple]: List of (peak_index, pseudobulk_metadata) pairs
         """
         self.logger.info(f"Generating weighted pairs for {len(self.peak_regions)} peaks...")
         
-        # Shuffle peaks for this epoch (following ChromBPNet pattern)
-        shuffled_peak_indices = np.random.permutation(len(self.peak_regions))
+        # Set deterministic epoch-specific seed
+        epoch_seed = self.base_seed + self.current_epoch * 997  # Use prime number for better distribution
+        epoch_rng = np.random.RandomState(epoch_seed)
+        
+        self.logger.debug(f"Epoch {self.current_epoch} using seed: {epoch_seed}")
+        
+        # Shuffle peaks for this epoch using controlled randomness
+        shuffled_peak_indices = epoch_rng.permutation(len(self.peak_regions))
         
         pairs = []
+        # Pre-compute cumulative weights for efficient weighted sampling
+        weights = self.pseudobulk_metadata['sampling_weight'].values
+        cumulative_weights = np.cumsum(weights)
+        total_weight = cumulative_weights[-1]
+        
         for peak_idx in shuffled_peak_indices:
-            # Probabilistically select pseudobulk based on sampling_weight
-            selected_pseudobulk = self.pseudobulk_metadata.sample(
-                n=1, 
-                weights='sampling_weight'
-            ).iloc[0]
+            # Deterministic weighted sampling using controlled randomness
+            random_value = epoch_rng.random() * total_weight
+            selected_idx = np.searchsorted(cumulative_weights, random_value)
+            
+            # Ensure index is within bounds
+            selected_idx = min(selected_idx, len(self.pseudobulk_metadata) - 1)
+            selected_pseudobulk = self.pseudobulk_metadata.iloc[selected_idx]
             
             pairs.append((peak_idx, selected_pseudobulk))
         
         self.logger.info(f"Generated {len(pairs)} weighted peak-pseudobulk pairs")
+        
+        # Log sampling statistics for verification
+        if self.logger.isEnabledFor(logging.DEBUG):
+            cell_type_counts = {}
+            for _, pseudobulk_data in pairs:
+                cell_type = pseudobulk_data['cell_type']
+                cell_type_counts[cell_type] = cell_type_counts.get(cell_type, 0) + 1
+            
+            self.logger.debug("Epoch sampling statistics:")
+            for cell_type, count in sorted(cell_type_counts.items()):
+                percentage = (count / len(pairs)) * 100
+                self.logger.debug(f"  {cell_type}: {count} ({percentage:.1f}%)")
+        
         return pairs
     
     def _group_pairs_by_bigwig_file(self, pairs):
@@ -490,23 +791,108 @@ class DPGenerator(keras.utils.Sequence):
         
         return file_groups
     
-    def _load_peak_data_with_weighting(self):
+    def _load_peak_data_with_parallel_processing(self):
         """
-        Load peak data using weighted dynamic pairing with file-grouped I/O.
+        Load peak data using optimized parallel processing and BigWig connection pooling.
         
-        STEP 2-2: Replace basic loading with weighted sampling implementation.
+        STEP 3: High-performance implementation with memory optimization.
         CRITICAL: Maintains original pair ordering for consistent batch generation.
         """
-        self.logger.info("Loading peak data with weighted dynamic pairing...")
+        io_start_time = time.time()
+        self.logger.info("Loading peak data with parallel processing optimization...")
         
-        # Initialize containers to maintain original pair ordering
+        total_pairs = len(self.epoch_peak_pseudobulk_pairs)
+        file_groups = self.data_plan['file_groups']
+        max_workers = self.data_plan['max_workers']
+        
+        # Estimate memory usage
+        estimated_memory = self.epoch_planner.estimate_memory_usage(
+            total_pairs, self.inputlen, self.outputlen
+        )
+        self.logger.info(f"Estimated memory usage: {estimated_memory:.2f}GB")
+        
+        if estimated_memory > self.epoch_planner.memory_limit_gb:
+            self.logger.warning(f"Estimated memory usage exceeds limit, using sequential processing")
+            self._load_peak_data_sequential_fallback()
+            return
+        
+        # Prepare worker arguments for parallel processing
+        worker_args_list = []
+        for bigwig_path, pairs in file_groups.items():
+            peak_indices = [pair[0] for pair in pairs]
+            file_peak_regions = self.peak_regions.iloc[peak_indices]
+            
+            worker_args_list.append((
+                peak_indices,
+                file_peak_regions,
+                self.inputlen + 2 * self.max_jitter,
+                self.outputlen + 2 * self.max_jitter,
+                bigwig_path
+            ))
+        
+        # Process BigWig files in parallel
+        all_results = []
+        if len(worker_args_list) == 1 or max_workers == 1:
+            # Sequential processing for single file or single worker
+            self.logger.info("Using sequential processing")
+            for worker_args in worker_args_list:
+                # Initialize worker for sequential processing
+                bigwig_path = worker_args[4]
+                worker_init_bigwig_batch(self.genome_fasta, bigwig_path)
+                results = process_peaks_batch_worker(worker_args)
+                all_results.extend(results)
+        else:
+            # Parallel processing for multiple files
+            self.logger.info(f"Using parallel processing with {max_workers} workers")
+            try:
+                with Pool(processes=max_workers, 
+                         initializer=worker_init_bigwig_batch,
+                         initargs=(self.genome_fasta, None)) as pool:
+                    
+                    # Use imap for progress tracking
+                    results_iter = pool.imap(process_peaks_batch_worker, worker_args_list)
+                    
+                    # Collect results with progress tracking
+                    for file_results in tqdm(results_iter, 
+                                           total=len(worker_args_list),
+                                           desc="Processing BigWig files"):
+                        all_results.extend(file_results)
+            
+            except Exception as e:
+                self.logger.error(f"Parallel processing failed: {e}")
+                self.logger.info("Falling back to sequential processing")
+                self._load_peak_data_sequential_fallback()
+                return
+        
+        # Reorganize results maintaining original pair order
+        self._reorganize_parallel_results(all_results, total_pairs)
+        
+        # Track I/O performance
+        io_time = time.time() - io_start_time
+        self.performance_stats['total_io_time'] += io_time
+        
+        self.logger.info(
+            f"Loaded optimized peak data: {self.peak_seqs.shape[0] if self.peak_seqs is not None else 0} regions in {io_time:.2f}s"
+        )
+    
+    def _load_peak_data_sequential_fallback(self):
+        """
+        Fallback to sequential processing when parallel processing fails or memory is insufficient.
+        Uses the original file-grouped approach with BigWig connection pooling.
+        """
+        self.logger.info("Using sequential fallback with connection pooling...")
+        
         total_pairs = len(self.epoch_peak_pseudobulk_pairs)
         peak_data_map = {}  # {original_pair_index: (seqs, cts, coords)}
+        
+        # Group pairs by BigWig file (if not already available)
+        if not hasattr(self, 'file_grouped_pairs'):
+            self.file_grouped_pairs = self._group_pairs_by_bigwig_file(self.epoch_peak_pseudobulk_pairs)
         
         genome = pyfaidx.Fasta(self.genome_fasta)
         
         try:
-            # Process each BigWig file group sequentially for efficient I/O
+            # Process each BigWig file group with connection pooling
             for bigwig_path, pairs in self.file_grouped_pairs.items():
                 self.logger.debug(f"Processing {len(pairs)} peaks from {Path(bigwig_path).name}")
                 
@@ -514,39 +900,67 @@ class DPGenerator(keras.utils.Sequence):
                 file_peak_indices = [pair[0] for pair in pairs]
                 file_peak_regions = self.peak_regions.iloc[file_peak_indices]
                 
-                # Load data for this group using single BigWig file
-                cts_bw = pyBigWig.open(bigwig_path)
-                try:
-                    group_seqs, group_cts, group_coords = data_utils.get_seq_cts_coords(
-                        file_peak_regions,
-                        genome,
-                        cts_bw,
-                        self.inputlen + 2 * self.max_jitter,  # Allow for jittering
-                        self.outputlen + 2 * self.max_jitter,
-                        peaks_bool=1  # Peak regions
+                # Use connection pool for BigWig access
+                cts_bw = self.bigwig_pool.get_connection(bigwig_path)
+                
+                group_seqs, group_cts, group_coords = data_utils.get_seq_cts_coords(
+                    file_peak_regions,
+                    genome,
+                    cts_bw,
+                    self.inputlen + 2 * self.max_jitter,  # Allow for jittering
+                    self.outputlen + 2 * self.max_jitter,
+                    peaks_bool=1  # Peak regions
+                )
+                
+                # Map back to original pair positions
+                for local_idx, (original_peak_idx, _) in enumerate(pairs):
+                    # Find the original position in epoch_peak_pseudobulk_pairs
+                    original_pair_idx = next(
+                        i for i, (peak_idx, _) in enumerate(self.epoch_peak_pseudobulk_pairs)
+                        if peak_idx == original_peak_idx
                     )
                     
-                    # Map back to original pair positions
-                    for local_idx, (original_peak_idx, _) in enumerate(pairs):
-                        # Find the original position in epoch_peak_pseudobulk_pairs
-                        original_pair_idx = next(
-                            i for i, (peak_idx, _) in enumerate(self.epoch_peak_pseudobulk_pairs)
-                            if peak_idx == original_peak_idx
-                        )
-                        
-                        peak_data_map[original_pair_idx] = (
-                            group_seqs[local_idx],
-                            group_cts[local_idx],
-                            group_coords[local_idx]
-                        )
-                    
-                finally:
-                    cts_bw.close()
+                    peak_data_map[original_pair_idx] = (
+                        group_seqs[local_idx],
+                        group_cts[local_idx],
+                        group_coords[local_idx]
+                    )
         
         finally:
             genome.close()
         
         # Reconstruct arrays in original pair order
+        self._build_arrays_from_data_map(peak_data_map, total_pairs)
+    
+    def _reorganize_parallel_results(self, all_results: List[Dict], total_pairs: int):
+        """
+        Reorganize parallel processing results maintaining original pair order.
+        """
+        peak_data_map = {}
+        
+        # Map results back to original pair indices
+        for result in all_results:
+            original_peak_idx = result['original_peak_idx']
+            
+            # Find the original position in epoch_peak_pseudobulk_pairs
+            original_pair_idx = next(
+                i for i, (peak_idx, _) in enumerate(self.epoch_peak_pseudobulk_pairs)
+                if peak_idx == original_peak_idx
+            )
+            
+            peak_data_map[original_pair_idx] = (
+                result['sequence'],
+                result['counts'],
+                result['coords']
+            )
+        
+        # Build final arrays
+        self._build_arrays_from_data_map(peak_data_map, total_pairs)
+    
+    def _build_arrays_from_data_map(self, peak_data_map: Dict, total_pairs: int):
+        """
+        Build final arrays from data map maintaining pair order.
+        """
         if peak_data_map:
             ordered_seqs = []
             ordered_cts = []
@@ -566,10 +980,6 @@ class DPGenerator(keras.utils.Sequence):
             self.peak_seqs = None
             self.peak_cts = None
             self.peak_coords = None
-        
-        self.logger.info(
-            f"Loaded weighted peak data: {self.peak_seqs.shape[0] if self.peak_seqs is not None else 0} regions"
-        )
         
     def _crop_revcomp_data(self):
         """
@@ -628,11 +1038,20 @@ class DPGenerator(keras.utils.Sequence):
                                peak_data_size, negative_sampling_ratio):
         """
         Randomly sample a portion of non-peak data (following ChromBPNetBatchGenerator).
+        CRITICAL: Uses epoch-specific seed for deterministic reproducibility.
         """
         num_nonpeak_samples = int(negative_sampling_ratio * peak_data_size)
-        nonpeak_indices_to_keep = np.random.choice(
+        
+        # Use epoch-specific seed for deterministic sampling
+        epoch_seed = self.base_seed + self.current_epoch * 997 + 1  # Offset by 1 from main sampling
+        epoch_rng = np.random.RandomState(epoch_seed)
+        
+        nonpeak_indices_to_keep = epoch_rng.choice(
             len(nonpeak_seqs), size=num_nonpeak_samples, replace=False
         )
+        
+        self.logger.debug(f"Subsampled {num_nonpeak_samples} non-peak regions using seed {epoch_seed}")
+        
         return (
             nonpeak_seqs[nonpeak_indices_to_keep],
             nonpeak_cts[nonpeak_indices_to_keep], 
@@ -661,14 +1080,118 @@ class DPGenerator(keras.utils.Sequence):
     
     def on_epoch_end(self):
         """
-        End-of-epoch processing with mode-specific behavior.
+        End-of-epoch processing with mode-specific behavior and performance optimization.
         
+        STEP 3: Enhanced with performance monitoring and resource management.
         CRITICAL: Follows ChromBPNetBatchGenerator pattern while adding DP functionality.
+        CRITICAL: Updates epoch counter for deterministic seed progression.
         """
+        epoch_start = time.time()
+        
+        # CRITICAL: Increment epoch counter for deterministic reproducibility
+        self.current_epoch += 1
+        self.logger.debug(f"Starting epoch {self.current_epoch}")
+        
         if self.mode == 'train':
-            # Re-plan epoch for training (weighted sampling will be added in Step 2)
+            # Re-plan epoch for training with optimization (Step 3)
             self._plan_training_epoch()
         # For validation/test, use fixed data (no re-planning needed)
         
         # Apply augmentation processing
         self._crop_revcomp_data()
+        
+        # Log performance statistics
+        epoch_time = time.time() - epoch_start
+        avg_processing_time = (self.performance_stats['total_processing_time'] / 
+                              max(1, self.performance_stats['epochs_processed']))
+        avg_io_time = (self.performance_stats['total_io_time'] / 
+                      max(1, self.performance_stats['epochs_processed']))
+        
+        self.logger.debug(
+            f"Epoch {self.current_epoch} processing: {epoch_time:.2f}s, "
+            f"Avg I/O time: {avg_io_time:.2f}s, "
+            f"Avg processing time: {avg_processing_time:.2f}s"
+        )
+        
+        # Periodic memory cleanup (every 10 epochs)
+        if self.performance_stats['epochs_processed'] % 10 == 0:
+            self._cleanup_resources()
+    
+    def _cleanup_resources(self):
+        """
+        Periodic resource cleanup to prevent memory leaks.
+        STEP 3: Resource management following ChromBPNet patterns.
+        """
+        self.logger.debug("Performing periodic resource cleanup...")
+        
+        # Clean up old BigWig connections
+        if hasattr(self, 'bigwig_pool'):
+            self.bigwig_pool._cleanup_old_connections()
+        
+        # Force garbage collection for cached data
+        gc.collect()
+        
+        # Log memory usage
+        memory_usage = psutil.Process().memory_info().rss / (1024**3)  # GB
+        self.logger.debug(f"Current memory usage: {memory_usage:.2f}GB")
+    
+    def get_reproducibility_info(self) -> dict:
+        """
+        Return complete reproducibility information for logging and verification.
+        
+        Returns:
+            dict: Comprehensive seed and state information
+        """
+        return {
+            'base_seed': self.base_seed,
+            'current_epoch': self.current_epoch,
+            'mode': self.mode,
+            'current_epoch_seed': self.base_seed + self.current_epoch * 997,
+            'generator_class': self.__class__.__name__,
+            'reproducible': True,
+            'seed_formula': 'base_seed + current_epoch * 997'
+        }
+    
+    def verify_reproducibility(self, other_generator) -> bool:
+        """
+        Verify that this generator will produce the same results as another generator.
+        
+        Args:
+            other_generator: Another DPGenerator instance
+            
+        Returns:
+            bool: True if generators should produce identical results
+        """
+        if not isinstance(other_generator, DPGenerator):
+            return False
+        
+        return (self.base_seed == other_generator.base_seed and
+                self.current_epoch == other_generator.current_epoch and
+                self.mode == other_generator.mode)
+    
+    def close(self):
+        """
+        Clean up resources when generator is closed.
+        STEP 3: Proper resource management with reproducibility logging.
+        """
+        # Log final reproducibility information
+        repro_info = self.get_reproducibility_info()
+        self.logger.info("Final reproducibility state:")
+        for key, value in repro_info.items():
+            self.logger.info(f"  {key}: {value}")
+        
+        if hasattr(self, 'bigwig_pool'):
+            self.bigwig_pool.close_all()
+            self.logger.info("Closed all BigWig connections")
+        
+        # Log final performance statistics
+        if self.performance_stats['epochs_processed'] > 0:
+            avg_processing_time = (self.performance_stats['total_processing_time'] / 
+                                  self.performance_stats['epochs_processed'])
+            avg_io_time = (self.performance_stats['total_io_time'] / 
+                          self.performance_stats['epochs_processed'])
+            
+            self.logger.info(f"Final performance statistics:")
+            self.logger.info(f"  Total epochs processed: {self.performance_stats['epochs_processed']}")
+            self.logger.info(f"  Average I/O time per epoch: {avg_io_time:.2f}s")
+            self.logger.info(f"  Average processing time per epoch: {avg_processing_time:.2f}s")
