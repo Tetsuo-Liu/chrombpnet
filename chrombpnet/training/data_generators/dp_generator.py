@@ -18,7 +18,7 @@ from chrombpnet.training.utils import data_utils
 from chrombpnet.training.utils.pseudobulk_validation import (
     PseudobulkMetadata, 
     load_pseudobulk_metadata, 
-    validate_pseudobulk_files
+    validate_and_enforce_file_integrity
 )
 import tensorflow as tf
 import numpy as np
@@ -38,16 +38,54 @@ from dataclasses import dataclass
 
 class DPGenerator(keras.utils.Sequence):
     """
-    Weighted Dynamic Pairing Generator for ChromBPNet Training
-    
-    This generator implements the core DP model innovation by probabilistically
-    pairing training peaks with pseudobulks based on sampling weights, ensuring
-    fair representation of rare but biologically important cell types.
-    
-    Architecture:
-    - Peak Regions: Weighted dynamic pairing from individual pseudobulk BigWig files
-    - Non-Peak Regions: Efficient access from single aggregated BigWig file
-    - Mode-specific augmentation following ChromBPNetBatchGenerator patterns
+    Weighted Dynamic Pairing (DP) Generator for ChromBPNet Training
+
+    This generator implements the core innovation of the DP model: a weighted dynamic
+    pairing data loader. Its primary goal is to ensure fair representation of rare
+    cell types during training by probabilistically sampling pseudobulks based on
+    pre-calculated sampling weights.
+
+    Key Design Principles:
+
+    1.  **Hybrid Data Loading for Consistency and Efficiency**:
+        To accurately model both biological signals and technical biases while
+        maintaining performance, a hybrid data loading strategy is employed:
+
+        a) **Peak Regions (Dynamic Pairing)**: Loaded from individual pseudobulk
+        BigWigs. This is the core of the DP strategy, ensuring that sequence
+        signals from rare cell types (e.g., hematopoietic stem cells) are
+        adequately represented during the learning of transcription factor
+        motifs and regulatory syntax.
+
+        b) **Non-Peak Regions (Aggregated Access)**: Loaded from a single,
+        pre-aggregated BigWig file. This design choice is critical for two
+        reasons:
+        i.  **Model Consistency**: The shared bias model (from Stage 05.3) was
+            trained on this same aggregated data. By using the aggregated
+            BigWig for non-peaks during DP model training, we ensure that the
+            background signal distribution is perfectly consistent with the
+            distribution on which the bias model was trained. This is crucial
+            for the effective factorization of bias from biological signals.
+        ii. **Performance**: Accessing a single file for the large number of
+            non-peak regions is vastly more efficient than performing dynamic
+            pairing, significantly reducing I/O overhead.
+
+    2.  **Reproducible Validation for Scientific Rigor**:
+        To ensure scientifically valid and reproducible model evaluation,
+        validation and test data are generated deterministically. This is
+        achieved by:
+
+        a) **Fixed Representative Pairing**: Validation peaks are paired with a
+        fixed set of "global representative" pseudobulks. These representatives
+        are selected deterministically (based on total signal and ID) and,
+        critically, are kept consistent across all cross-validation folds. This
+        allows for fair and unbiased comparison of model performance across
+        different folds.
+
+        b) **Disabled Augmentation**: All stochastic data augmentations (jitter,
+        reverse complement, and shuffling) are strictly disabled for validation
+        and test modes. This guarantees that the evaluation dataset is identical
+        for every run, a cornerstone of reproducible research.
     """
     
     def __init__(self, 
@@ -126,7 +164,7 @@ class DPGenerator(keras.utils.Sequence):
         
         # MANDATORY: Validate all BigWig files before training
         self.logger.info("Validating pseudobulk BigWig files...")
-        validation_report = validate_pseudobulk_files(metadata_list)
+        validation_report = validate_and_enforce_file_integrity(metadata_list)
         
         # Convert to DataFrame for easier manipulation
         self.pseudobulk_metadata = pd.DataFrame([
@@ -245,6 +283,9 @@ class DPGenerator(keras.utils.Sequence):
     def _plan_training_epoch(self):
         """
         Plan training epoch with weighted dynamic pairing for peak regions.
+        
+        STEP 2-2: Implement probabilistic pseudobulk selection for training.
+        Each epoch generates new (peak, pseudobulk) pairs based on sampling_weight.
         """
         if self.peak_regions is None or len(self.peak_regions) == 0:
             self.peak_seqs = None
@@ -252,13 +293,23 @@ class DPGenerator(keras.utils.Sequence):
             self.peak_coords = None
             return
             
-        # For now, implement basic peak data loading without weighting
-        # Weighted sampling will be implemented in Step 2
-        self._load_peak_data_basic()
+        self.logger.info("Planning training epoch with weighted dynamic pairing...")
+        
+        # Step 1: Generate probabilistic peak-pseudobulk pairings for this epoch
+        self.epoch_peak_pseudobulk_pairs = self._generate_weighted_peak_pseudobulk_pairs()
+        
+        # Step 2: Group pairs by BigWig file for efficient I/O
+        self.file_grouped_pairs = self._group_pairs_by_bigwig_file(self.epoch_peak_pseudobulk_pairs)
+        
+        # Step 3: Load peak data using the weighted pairings
+        self._load_peak_data_with_weighting()
         
     def _create_fixed_validation_set(self):
         """
         Create fixed validation set with global representatives for reproducibility.
+        
+        STEP 2-2: Implement fixed validation pairing using global representatives.
+        CRITICAL: Same representatives across all folds for consistent cross-validation.
         """
         if self.peak_regions is None or len(self.peak_regions) == 0:
             self.peak_seqs = None
@@ -266,44 +317,258 @@ class DPGenerator(keras.utils.Sequence):
             self.peak_coords = None
             return
             
-        # For now, implement basic peak data loading
-        # Fixed validation pairing will be implemented in Step 2
-        self._load_peak_data_basic()
+        self.logger.info("Creating fixed validation set with global representatives...")
         
-    def _load_peak_data_basic(self):
+        # Step 1: Create fixed validation pairs using global representatives
+        self.fixed_validation_pairs = self._generate_fixed_validation_pairs()
+        
+        # Step 2: Group pairs by BigWig file for efficient I/O (same as training)
+        self.file_grouped_pairs = self._group_pairs_by_bigwig_file(self.fixed_validation_pairs)
+        
+        # Step 3: Load validation data (reuse weighted loading logic)
+        self._load_validation_data_with_fixed_pairs()
+        
+    def _generate_fixed_validation_pairs(self):
         """
-        Basic peak data loading (placeholder for weighted sampling implementation).
+        Generate fixed (peak, representative_pseudobulk) pairs for validation.
         
-        For Step1-2, we implement basic functionality. Weighted sampling will be
-        added in Step 2.
+        STEP 2-2: Fixed validation pairing with global representatives.
+        CRITICAL: No shuffling, no randomization - fully reproducible.
         """
-        self.logger.info(f"Loading {len(self.peak_regions)} peak regions (basic mode)...")
+        validation_pairs = []
         
-        # For now, use the first representative pseudobulk as default
-        default_representative = self.global_representatives.iloc[0]
-        default_bigwig_path = default_representative['bigwig_path']
+        # Use deterministic pairing: each peak paired with all global representatives
+        # For efficiency, we cycle through representatives
+        representative_list = list(self.global_representatives.iterrows())
         
-        self.logger.info(f"Using default BigWig for peak regions: {default_bigwig_path}")
+        for peak_idx in range(len(self.peak_regions)):
+            # Cycle through representatives deterministically
+            representative_idx = peak_idx % len(representative_list)
+            _, representative_data = representative_list[representative_idx]
+            
+            validation_pairs.append((peak_idx, representative_data))
         
-        # Load peak data using standard ChromBPNet approach
+        self.logger.info(f"Generated {len(validation_pairs)} fixed validation pairs")
+        self.logger.info(f"Using {len(representative_list)} global representatives")
+        
+        return validation_pairs
+    
+    def _load_validation_data_with_fixed_pairs(self):
+        """
+        Load validation data using fixed representative pairings.
+        
+        STEP 2-2: Validation data loading with global representatives.
+        CRITICAL: No jitter, no augmentation - reproducible evaluation data.
+        """
+        self.logger.info("Loading validation data with fixed representative pairs...")
+        
+        # Initialize containers to maintain original pair ordering
+        total_pairs = len(self.fixed_validation_pairs)
+        peak_data_map = {}
+        
         genome = pyfaidx.Fasta(self.genome_fasta)
-        cts_bw = pyBigWig.open(str(default_bigwig_path))
         
         try:
-            self.peak_seqs, self.peak_cts, self.peak_coords = data_utils.get_seq_cts_coords(
-                self.peak_regions,
-                genome, 
-                cts_bw,
-                self.inputlen + 2 * self.max_jitter,  # Allow for jittering
-                self.outputlen + 2 * self.max_jitter,
-                peaks_bool=1  # Peak regions
-            )
+            # Process each BigWig file group sequentially for efficient I/O
+            for bigwig_path, pairs in self.file_grouped_pairs.items():
+                self.logger.debug(f"Processing {len(pairs)} validation peaks from {Path(bigwig_path).name}")
+                
+                # Extract peak regions (no jitter for validation)
+                file_peak_indices = [pair[0] for pair in pairs]
+                file_peak_regions = self.peak_regions.iloc[file_peak_indices]
+                
+                # Load validation data (no jitter - exact regions only)
+                cts_bw = pyBigWig.open(bigwig_path)
+                try:
+                    group_seqs, group_cts, group_coords = data_utils.get_seq_cts_coords(
+                        file_peak_regions,
+                        genome,
+                        cts_bw,
+                        self.inputlen,    # No jitter for validation
+                        self.outputlen,   # No jitter for validation  
+                        peaks_bool=1
+                    )
+                    
+                    # Map back to original pair positions
+                    for local_idx, (original_peak_idx, _) in enumerate(pairs):
+                        original_pair_idx = next(
+                            i for i, (peak_idx, _) in enumerate(self.fixed_validation_pairs)
+                            if peak_idx == original_peak_idx
+                        )
+                        
+                        peak_data_map[original_pair_idx] = (
+                            group_seqs[local_idx],
+                            group_cts[local_idx],
+                            group_coords[local_idx]
+                        )
+                    
+                finally:
+                    cts_bw.close()
+        
         finally:
-            cts_bw.close()
             genome.close()
+        
+        # Reconstruct arrays in original pair order
+        if peak_data_map:
+            ordered_seqs = []
+            ordered_cts = []
+            ordered_coords = []
             
+            for pair_idx in range(total_pairs):
+                if pair_idx in peak_data_map:
+                    seq, cts, coord = peak_data_map[pair_idx]
+                    ordered_seqs.append(seq)
+                    ordered_cts.append(cts)
+                    ordered_coords.append(coord)
+            
+            self.peak_seqs = np.array(ordered_seqs)
+            self.peak_cts = np.array(ordered_cts)
+            self.peak_coords = np.array(ordered_coords)
+        else:
+            self.peak_seqs = None
+            self.peak_cts = None
+            self.peak_coords = None
+        
         self.logger.info(
-            f"Loaded peak data: {self.peak_seqs.shape[0] if self.peak_seqs is not None else 0} regions"
+            f"Loaded fixed validation data: {self.peak_seqs.shape[0] if self.peak_seqs is not None else 0} regions"
+        )
+        
+
+    
+    def _generate_weighted_peak_pseudobulk_pairs(self):
+        """
+        Generate probabilistic (peak, pseudobulk) pairs for the current epoch.
+        
+        STEP 2-2: Core weighted dynamic pairing implementation.
+        
+        Returns:
+            List[Tuple]: List of (peak_index, pseudobulk_metadata) pairs
+        """
+        self.logger.info(f"Generating weighted pairs for {len(self.peak_regions)} peaks...")
+        
+        # Shuffle peaks for this epoch (following ChromBPNet pattern)
+        shuffled_peak_indices = np.random.permutation(len(self.peak_regions))
+        
+        pairs = []
+        for peak_idx in shuffled_peak_indices:
+            # Probabilistically select pseudobulk based on sampling_weight
+            selected_pseudobulk = self.pseudobulk_metadata.sample(
+                n=1, 
+                weights='sampling_weight'
+            ).iloc[0]
+            
+            pairs.append((peak_idx, selected_pseudobulk))
+        
+        self.logger.info(f"Generated {len(pairs)} weighted peak-pseudobulk pairs")
+        return pairs
+    
+    def _group_pairs_by_bigwig_file(self, pairs):
+        """
+        Group (peak, pseudobulk) pairs by BigWig file for efficient I/O.
+        
+        STEP 2-2: File-grouped loading optimization.
+        
+        Args:
+            pairs: List of (peak_index, pseudobulk_metadata) pairs
+            
+        Returns:
+            Dict: {bigwig_path: [(peak_index, pseudobulk_metadata), ...]}
+        """
+        file_groups = {}
+        
+        for peak_idx, pseudobulk_metadata in pairs:
+            bigwig_path = str(pseudobulk_metadata['bigwig_path'])
+            
+            if bigwig_path not in file_groups:
+                file_groups[bigwig_path] = []
+            
+            file_groups[bigwig_path].append((peak_idx, pseudobulk_metadata))
+        
+        self.logger.info(f"Grouped pairs into {len(file_groups)} BigWig files")
+        for bigwig_path, group_pairs in file_groups.items():
+            self.logger.debug(f"  {Path(bigwig_path).name}: {len(group_pairs)} peaks")
+        
+        return file_groups
+    
+    def _load_peak_data_with_weighting(self):
+        """
+        Load peak data using weighted dynamic pairing with file-grouped I/O.
+        
+        STEP 2-2: Replace basic loading with weighted sampling implementation.
+        CRITICAL: Maintains original pair ordering for consistent batch generation.
+        """
+        self.logger.info("Loading peak data with weighted dynamic pairing...")
+        
+        # Initialize containers to maintain original pair ordering
+        total_pairs = len(self.epoch_peak_pseudobulk_pairs)
+        peak_data_map = {}  # {original_pair_index: (seqs, cts, coords)}
+        
+        genome = pyfaidx.Fasta(self.genome_fasta)
+        
+        try:
+            # Process each BigWig file group sequentially for efficient I/O
+            for bigwig_path, pairs in self.file_grouped_pairs.items():
+                self.logger.debug(f"Processing {len(pairs)} peaks from {Path(bigwig_path).name}")
+                
+                # Extract peak regions and track their original positions
+                file_peak_indices = [pair[0] for pair in pairs]
+                file_peak_regions = self.peak_regions.iloc[file_peak_indices]
+                
+                # Load data for this group using single BigWig file
+                cts_bw = pyBigWig.open(bigwig_path)
+                try:
+                    group_seqs, group_cts, group_coords = data_utils.get_seq_cts_coords(
+                        file_peak_regions,
+                        genome,
+                        cts_bw,
+                        self.inputlen + 2 * self.max_jitter,  # Allow for jittering
+                        self.outputlen + 2 * self.max_jitter,
+                        peaks_bool=1  # Peak regions
+                    )
+                    
+                    # Map back to original pair positions
+                    for local_idx, (original_peak_idx, _) in enumerate(pairs):
+                        # Find the original position in epoch_peak_pseudobulk_pairs
+                        original_pair_idx = next(
+                            i for i, (peak_idx, _) in enumerate(self.epoch_peak_pseudobulk_pairs)
+                            if peak_idx == original_peak_idx
+                        )
+                        
+                        peak_data_map[original_pair_idx] = (
+                            group_seqs[local_idx],
+                            group_cts[local_idx],
+                            group_coords[local_idx]
+                        )
+                    
+                finally:
+                    cts_bw.close()
+        
+        finally:
+            genome.close()
+        
+        # Reconstruct arrays in original pair order
+        if peak_data_map:
+            ordered_seqs = []
+            ordered_cts = []
+            ordered_coords = []
+            
+            for pair_idx in range(total_pairs):
+                if pair_idx in peak_data_map:
+                    seq, cts, coord = peak_data_map[pair_idx]
+                    ordered_seqs.append(seq)
+                    ordered_cts.append(cts)
+                    ordered_coords.append(coord)
+            
+            self.peak_seqs = np.array(ordered_seqs)
+            self.peak_cts = np.array(ordered_cts)  
+            self.peak_coords = np.array(ordered_coords)
+        else:
+            self.peak_seqs = None
+            self.peak_cts = None
+            self.peak_coords = None
+        
+        self.logger.info(
+            f"Loaded weighted peak data: {self.peak_seqs.shape[0] if self.peak_seqs is not None else 0} regions"
         )
         
     def _crop_revcomp_data(self):
