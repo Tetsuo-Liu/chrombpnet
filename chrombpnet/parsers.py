@@ -124,6 +124,11 @@ def read_parser():
         optional_main_parser.add_argument("-dil", "--n-dilation-layers", type=int, default=8, help="Number of dilation layers to use in chrombpnet model")
         optional_main_parser.add_argument("-j", "--max-jitter", type=int, default=500, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
         optional_main_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
+
+        # DP model specific arguments
+        optional_main_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic'], default='standard', help='Data generator type for training')
+        optional_main_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
+        optional_main_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic)')
  
          # chrombpnet pipeline arguments
 		
@@ -140,6 +145,11 @@ def read_parser():
         optional_pipeline_parser.add_argument("-dil", "--n-dilation-layers", type=int, default=8, help="Number of dilation layers to use in chrombpnet model")
         optional_pipeline_parser.add_argument("-j", "--max-jitter", type=int, default=500, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
         optional_pipeline_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
+
+        # DP model specific arguments
+        optional_pipeline_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic'], default='standard', help='Data generator type for training')
+        optional_pipeline_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
+        optional_pipeline_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic)')
  
         # chrombpnet model qc arguments
 

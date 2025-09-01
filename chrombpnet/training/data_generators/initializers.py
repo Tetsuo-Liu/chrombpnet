@@ -1,4 +1,5 @@
 import chrombpnet.training.data_generators.batchgen_generator as batchgen_generator
+import chrombpnet.training.data_generators.dp_generator as dp_generator
 from chrombpnet.training.utils import data_utils
 from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 import pandas as pd
@@ -78,19 +79,49 @@ def initialize_generators(args, mode, parameters, return_coords):
     inputlen, outputlen, \
     nonpeak_regions, negative_sampling_ratio, \
     max_jitter, add_revcomp, shuffle_at_epoch_start  =  fetch_data_and_model_params_based_on_mode(mode, args, parameters, nonpeak_regions, peak_regions)
-    generator=batchgen_generator.ChromBPNetBatchGenerator(
-                                    peak_regions=peak_regions,
-                                    nonpeak_regions=nonpeak_regions,
-                                    genome_fasta=args.genome,
-                                    batch_size=args.batch_size,
-                                    inputlen=inputlen,                                        
-                                    outputlen=outputlen,
-                                    max_jitter=max_jitter,
-                                    negative_sampling_ratio=negative_sampling_ratio,
-                                    cts_bw_file=args.bigwig,
-                                    add_revcomp=add_revcomp,
-                                    return_coords=return_coords,
-                                    shuffle_at_epoch_start=shuffle_at_epoch_start
-                                    )
+    
+    # Check if weighted_dynamic generator is requested
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'weighted_dynamic':
+        # Validate required arguments for DP generator
+        if not hasattr(args, 'pseudobulk_metadata') or args.pseudobulk_metadata is None:
+            raise ValueError("--pseudobulk-metadata is required when using weighted_dynamic generator")
+        if not hasattr(args, 'aggregated_bigwig') or args.aggregated_bigwig is None:
+            raise ValueError("--aggregated-bigwig is required when using weighted_dynamic generator")
+        
+        print(f"Initializing DPGenerator with mode: {mode}")
+        generator = dp_generator.DPGenerator(
+            peak_regions=peak_regions,
+            nonpeak_regions=nonpeak_regions,
+            pseudobulk_metadata_path=args.pseudobulk_metadata,
+            aggregated_bigwig_path=args.aggregated_bigwig,
+            genome_fasta=args.genome,
+            batch_size=args.batch_size,
+            inputlen=inputlen,
+            outputlen=outputlen,
+            max_jitter=max_jitter,
+            negative_sampling_ratio=negative_sampling_ratio,
+            add_revcomp=add_revcomp,
+            return_coords=return_coords,
+            shuffle_at_epoch_start=shuffle_at_epoch_start,
+            mode=mode,
+            seed=args.seed if hasattr(args, 'seed') else None
+        )
+    else:
+        # Standard generator (existing implementation)
+        print(f"Initializing standard ChromBPNetBatchGenerator with mode: {mode}")
+        generator = batchgen_generator.ChromBPNetBatchGenerator(
+            peak_regions=peak_regions,
+            nonpeak_regions=nonpeak_regions,
+            genome_fasta=args.genome,
+            batch_size=args.batch_size,
+            inputlen=inputlen,                                        
+            outputlen=outputlen,
+            max_jitter=max_jitter,
+            negative_sampling_ratio=negative_sampling_ratio,
+            cts_bw_file=args.bigwig,
+            add_revcomp=add_revcomp,
+            return_coords=return_coords,
+            shuffle_at_epoch_start=shuffle_at_epoch_start
+        )
     
     return generator
