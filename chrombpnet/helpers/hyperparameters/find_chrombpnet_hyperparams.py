@@ -7,6 +7,28 @@ import os
 from chrombpnet.helpers.hyperparameters import param_utils as param_utils
 from tensorflow import keras
 import json
+import multiprocessing
+from tqdm import tqdm
+import logging
+
+# Global variables for multiprocessing
+_genome = None
+_bw = None
+
+def _init_worker(genome_path, bw_path):
+    """Initialize worker process with genome and bigwig files"""
+    global _genome, _bw
+    _genome = pyfaidx.Fasta(genome_path)
+    _bw = pyBigWig.open(bw_path)
+
+def _get_seqs_cts_wrapper(args):
+    """Wrapper function for parallel processing of get_seqs_cts"""
+    regions, inputlen, outputlen, region_type = args
+    global _genome, _bw
+    
+    logging.debug(f"Processing {len(regions)} {region_type} regions")
+    cnts, seqs = param_utils.get_seqs_cts(_genome, _bw, regions, inputlen, outputlen)
+    return cnts, seqs, region_type
 
 def parse_data_args():
     parser=argparse.ArgumentParser(description="find hyper-parameters for chrombpnet defined in src/training/models/chrombpnet_with_bias_model.py")
@@ -59,6 +81,11 @@ def adjust_bias_model_logcounts(bias_model, seqs, cts):
 
 
 def main(args): 
+    # Setup logging
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
 
     # read the fold information - we will evaluate hyperparams on the train+valid set and do nothing on the test set 
     splits_dict=json.load(open(args.chr_fold_path))
@@ -100,10 +127,43 @@ def main(args):
     test_nonpeaks = param_utils.filter_edge_regions(test_nonpeaks, bw, args.inputlen, peaks_bool=0)
 
     # step 2 filtering: filter peaks that are outliers in train and valid set - no filtering on test set
-    peak_cnts, _ = param_utils.get_seqs_cts(genome, bw, peaks, args.inputlen, args.outputlen)
-    nonpeak_cnts, nonpeak_seqs = param_utils.get_seqs_cts(genome, bw, nonpeaks, args.inputlen, args.outputlen)    
+    print("Processing sequences and counts in parallel...")
+    logging.debug(f"Processing {peaks.shape[0]} peaks and {nonpeaks.shape[0]} nonpeaks")
+    
+    # Prepare tasks for parallel processing
+    tasks = [
+        (peaks, args.inputlen, args.outputlen, "peaks"),
+        (nonpeaks, args.inputlen, args.outputlen, "nonpeaks")
+    ]
+    
+    # Process in parallel using all available CPUs
+    num_processes = multiprocessing.cpu_count()
+    logging.debug(f"Using {num_processes} processes for parallel processing")
+    
+    with multiprocessing.Pool(
+        processes=num_processes,
+        initializer=_init_worker,
+        initargs=(args.genome, args.bigwig)
+    ) as pool:
+        results = list(tqdm(pool.imap(_get_seqs_cts_wrapper, tasks), 
+                           total=len(tasks), 
+                           desc="Processing regions"))
+    
+    # Extract results
+    peak_cnts = None
+    nonpeak_cnts = None
+    nonpeak_seqs = None
+    
+    for cnts, seqs, region_type in results:
+        if region_type == "peaks":
+            peak_cnts = cnts
+        elif region_type == "nonpeaks":
+            nonpeak_cnts = cnts
+            nonpeak_seqs = seqs
+    
     assert(len(peak_cnts) == peaks.shape[0])
     assert(len(nonpeak_cnts) == nonpeaks.shape[0])
+    logging.debug("Parallel processing completed successfully")
 
 
     if args.negative_sampling_ratio > 0:
