@@ -411,6 +411,9 @@ class DPGenerator(keras.utils.Sequence):
         # Initialize epoch data
         self._initialize_epoch_data()
         
+        # Apply data augmentation for epoch 0 (following ChromBPNetBatchGenerator pattern)
+        self._crop_revcomp_data()
+        
     def _initialize_validation_and_metadata(self, pseudobulk_metadata_path: str):
         """
         Load and validate pseudobulk metadata with comprehensive error checking.
