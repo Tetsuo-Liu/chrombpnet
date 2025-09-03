@@ -13,16 +13,32 @@ def chrombpnet_train_pipeline(args):
 	else:
 		fpx = ""
 		
-	# Shift bam and convert to bigwig
-	import chrombpnet.helpers.preprocessing.reads_to_bigwig as reads_to_bigwig	
-	args.output_prefix = os.path.join(args.output_dir,"auxiliary/{}data".format(fpx))
-	args.plus_shift = None
-	args.minus_shift = None
-	reads_to_bigwig.main(args)
+	# Shift bam and convert to bigwig, or use existing bigwig
+	if args.input_bigwig:
+		print(f"Bypassing bigWig generation, using provided file: {args.input_bigwig}")
+		# The pipeline expects the bigwig at this path, so create a symlink
+		symlink_path = os.path.join(args.output_dir, "auxiliary/{}data_unstranded.bw".format(fpx))
+		# Ensure the source path is absolute for the symlink
+		source_path = os.path.abspath(args.input_bigwig)
+		if os.path.lexists(symlink_path):
+			os.remove(symlink_path)
+		os.symlink(source_path, symlink_path)
+		print(f"Created symlink: {symlink_path} -> {source_path}")
+		# Set the bigwig path in args for subsequent steps
+		args.bigwig = symlink_path
+	else:
+		print("No input bigWig provided, generating from fragments/BAM...")
+		import chrombpnet.helpers.preprocessing.reads_to_bigwig as reads_to_bigwig	
+		args.output_prefix = os.path.join(args.output_dir,"auxiliary/{}data".format(fpx))
+		args.plus_shift = None
+		args.minus_shift = None
+		reads_to_bigwig.main(args)
+		# Set the bigwig path for subsequent steps
+		args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
 	
 	# QC bigwig
 	import chrombpnet.helpers.preprocessing.analysis.build_pwm_from_bigwig as build_pwm_from_bigwig	
-	args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
+	# args.bigwig is already set above (either from symlink or from reads_to_bigwig output)
 	args.output_prefix = os.path.join(args.output_dir,"evaluation/{}bw_shift_qc".format(fpx))
 	folds = json.load(open(args.chr_fold_path))
 	assert(len(folds["valid"]) > 0) # validation list of chromosomes is empty
@@ -290,10 +306,12 @@ def train_bias_pipeline(args):
 		args.plus_shift = None
 		args.minus_shift = None
 		reads_to_bigwig.main(args)
+		# Set the bigwig path for subsequent steps
+		args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
 	
 	# QC bigwig
 	import chrombpnet.helpers.preprocessing.analysis.build_pwm_from_bigwig as build_pwm_from_bigwig	
-	args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
+	# args.bigwig is already set above (either from symlink or from reads_to_bigwig output)
 	args.output_prefix = os.path.join(args.output_dir,"evaluation/{}bw_shift_qc".format(fpx))
 	folds = json.load(open(args.chr_fold_path))
 	assert(len(folds["valid"]) > 0) # validation list of chromosomes is empty

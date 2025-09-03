@@ -50,8 +50,7 @@ def read_parser():
                 group.add_argument('-ibam', '--input-bam-file', type=str, help="Input BAM file")
                 group.add_argument('-ifrag', '--input-fragment-file', type=str, help="Input fragment file")
                 group.add_argument('-itag', '--input-tagalign-file', type=str, help="Input tagAlign file")
-                if is_bias_model:
-                        group.add_argument('-ibw', '--input-bigwig', type=str, help="Input bigWig file, bypasses fragment processing")
+                group.add_argument('-ibw', '--input-bigwig', type=str, help="Input bigWig file, bypasses fragment processing")
                 required_train.add_argument('-o', '--output-dir', type=str, required=True, help="Output dir (path/to/output/dir)")
                 required_train.add_argument('-d', '--data-type', required=True, type=str, choices=['ATAC', 'DNASE'], help="assay type")
                 required_train.add_argument("-p", "--peaks", type=str, required=True, help="10 column bed file of peaks. Sequences and labels will be extracted centered at start (2nd col) + summit (10th col).")
@@ -306,5 +305,35 @@ def read_parser():
         # Pull the arguments
         
         args = parser.parse_args()
+        
+        # Validate argument dependencies
+        validate_argument_dependencies(args)
 
         return args
+
+
+def validate_argument_dependencies(args):
+    """
+    Validate argument dependencies that cannot be expressed directly in argparse.
+    
+    Args:
+        args: Parsed arguments from argparse
+        
+    Raises:
+        ValueError: If argument dependencies are not satisfied
+    """
+    # Check weighted_dynamic generator dependencies
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'weighted_dynamic':
+        missing_args = []
+        
+        if not hasattr(args, 'pseudobulk_metadata') or args.pseudobulk_metadata is None:
+            missing_args.append('--pseudobulk-metadata')
+        
+        if not hasattr(args, 'aggregated_bigwig') or args.aggregated_bigwig is None:
+            missing_args.append('--aggregated-bigwig')
+        
+        if missing_args:
+            raise ValueError(
+                f"When using --data-generator-type weighted_dynamic, the following arguments are required: "
+                f"{', '.join(missing_args)}. Please provide these arguments to use the weighted dynamic pairing generator."
+            )
