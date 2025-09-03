@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 from chrombpnet.helpers.hyperparameters import param_utils as param_utils
+from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 from tensorflow import keras
 import json
 import multiprocessing
@@ -97,15 +98,9 @@ def main(args):
     bw = pyBigWig.open(args.bigwig) 
     genome = pyfaidx.Fasta(args.genome)
 
-    # read peaks and non peaks    
-    in_peaks =  pd.read_csv(args.peaks,
-                           sep='\t',
-                           header=None,
-                           names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
-    in_nonpeaks =  pd.read_csv(args.nonpeaks,
-                           sep='\t',
-                           header=None,
-                           names=["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"])
+    # read peaks and non peaks using shared utility function
+    in_peaks = read_bed_with_summit(args.peaks)
+    in_nonpeaks = read_bed_with_summit(args.nonpeaks)
 
     assert(in_peaks.shape[0] != 0) # peaks file is empty
     assert(in_nonpeaks.shape[0] !=0) # non peaks file is empty
