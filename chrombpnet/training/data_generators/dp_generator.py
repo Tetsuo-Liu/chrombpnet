@@ -10,6 +10,17 @@ Key Features:
 - Mode-specific augmentation: training vs validation/test reproducibility
 - Global representative selection for cross-validation consistency
 - Comprehensive validation integration with mandatory error termination
+
+Migration Note:
+This generator uses pseudobulk-level weighted dynamic pairing. However, the DP model v1.3
+improvement plan introduced a more efficient cell-type-level aggregation approach
+(implemented in CelltypeGenerator) that addresses:
+1. Computational inefficiency: Too many individual bigWig files to manage
+2. Scale mismatch: Bias model trained on aggregated_all.bw vs individual pseudobulk scales
+
+The CelltypeGenerator replaces this approach by aggregating data at the cell-type level
+and providing dynamic scaling factors to correct bias predictions. This generator is
+retained for backward compatibility and comparison purposes.
 """
 
 from tensorflow import keras

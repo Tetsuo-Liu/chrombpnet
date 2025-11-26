@@ -76,7 +76,22 @@ def predict_on_batch_wrapper(model,test_generator):
         if idx%100==0:
             print(str(idx)+'/'+str(num_batches))
         
-        X,y,coords=test_generator[idx]
+        batch_data = test_generator[idx]
+        
+        # Handle different generator types
+        # CelltypeGenerator returns 3-element tuple (inputs, targets, sample_weights)
+        # and provides coordinates via get_coords() method
+        if hasattr(test_generator, 'get_coords'):
+            # CelltypeGenerator: use get_coords() method
+            X, y = batch_data[:2]  # inputs, targets
+            coords = test_generator.get_coords(idx)
+        elif len(batch_data) == 3:
+            # Standard generators: (inputs, targets, coords)
+            X, y, coords = batch_data
+        else:
+            # Fallback: (inputs, targets) only
+            X, y = batch_data
+            coords = None
 
         #get the model predictions            
         preds=model.predict_on_batch(X)
@@ -88,7 +103,9 @@ def predict_on_batch_wrapper(model,test_generator):
         # get profile predictions
         true_counts_sum.extend(y[1][:,0])
         counts_sum_predictions.extend(preds[1][:,0])
-        coordinates.extend(coords)
+        
+        if coords is not None:
+            coordinates.extend(coords)
 
     return np.array(true_counts), np.array(profile_probs_predictions), np.array(true_counts_sum), np.array(counts_sum_predictions), np.array(coordinates)
 
