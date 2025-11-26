@@ -8,28 +8,6 @@ from chrombpnet.helpers.hyperparameters import param_utils as param_utils
 from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 from tensorflow import keras
 import json
-import multiprocessing
-from tqdm import tqdm
-import logging
-
-# Global variables for multiprocessing
-_genome = None
-_bw = None
-
-def _init_worker(genome_path, bw_path):
-    """Initialize worker process with genome and bigwig files"""
-    global _genome, _bw
-    _genome = pyfaidx.Fasta(genome_path)
-    _bw = pyBigWig.open(bw_path)
-
-def _get_seqs_cts_wrapper(args):
-    """Wrapper function for parallel processing of get_seqs_cts by chromosome"""
-    chrom, regions_group, inputlen, outputlen, region_type = args
-    global _genome, _bw
-    
-    logging.debug(f"Processing chromosome {chrom}: {len(regions_group)} {region_type} regions")
-    cnts, seqs = param_utils.get_seqs_cts(_genome, _bw, regions_group, inputlen, outputlen)
-    return chrom, cnts, seqs, region_type
 
 def parse_data_args():
     parser=argparse.ArgumentParser(description="find hyper-parameters for chrombpnet defined in src/training/models/chrombpnet_with_bias_model.py")
@@ -82,11 +60,6 @@ def adjust_bias_model_logcounts(bias_model, seqs, cts):
 
 
 def main(args): 
-    # Setup logging
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
 
     # read the fold information - we will evaluate hyperparams on the train+valid set and do nothing on the test set 
     splits_dict=json.load(open(args.chr_fold_path))
@@ -122,61 +95,10 @@ def main(args):
     test_nonpeaks = param_utils.filter_edge_regions(test_nonpeaks, bw, args.inputlen, peaks_bool=0)
 
     # step 2 filtering: filter peaks that are outliers in train and valid set - no filtering on test set
-    print("Processing sequences and counts in parallel by chromosome...")
-    logging.debug(f"Processing {peaks.shape[0]} peaks and {nonpeaks.shape[0]} nonpeaks")
-    
-    # Group by chromosome for memory-efficient parallel processing (following bias pipeline pattern)
-    tasks = []
-    
-    # Add chromosome-grouped peaks tasks
-    for chrom, peak_group in peaks.groupby('chr'):
-        tasks.append((chrom, peak_group, args.inputlen, args.outputlen, "peaks"))
-    
-    # Add chromosome-grouped nonpeaks tasks  
-    for chrom, nonpeak_group in nonpeaks.groupby('chr'):
-        tasks.append((chrom, nonpeak_group, args.inputlen, args.outputlen, "nonpeaks"))
-    
-    # Use efficient CPU count (following bias pipeline pattern)
-    num_processes = min(max(1, multiprocessing.cpu_count() // 2), 16)
-    logging.debug(f"Using {num_processes} processes for {len(tasks)} chromosome tasks")
-    
-    with multiprocessing.Pool(
-        processes=num_processes,
-        initializer=_init_worker,
-        initargs=(args.genome, args.bigwig)
-    ) as pool:
-        results = list(tqdm(pool.imap(_get_seqs_cts_wrapper, tasks), 
-                           total=len(tasks), 
-                           desc="Processing chromosomes"))
-    
-    # Reconstruct results by region type
-    peak_cnts_dict = {}
-    nonpeak_cnts_dict = {}
-    nonpeak_seqs_dict = {}
-    
-    for chrom, cnts, seqs, region_type in results:
-        if region_type == "peaks":
-            peak_cnts_dict[chrom] = cnts
-        elif region_type == "nonpeaks":
-            nonpeak_cnts_dict[chrom] = cnts
-            nonpeak_seqs_dict[chrom] = seqs
-    
-    # Combine results in original order to match DataFrame indices
-    peak_cnts = []
-    for chrom, group in peaks.groupby('chr'):
-        peak_cnts.extend(peak_cnts_dict[chrom])
-    peak_cnts = np.array(peak_cnts)
-    
-    nonpeak_cnts = []
-    nonpeak_seqs = []
-    for chrom, group in nonpeaks.groupby('chr'):
-        nonpeak_cnts.extend(nonpeak_cnts_dict[chrom])
-        nonpeak_seqs.extend(nonpeak_seqs_dict[chrom])
-    nonpeak_cnts = np.array(nonpeak_cnts)
-    
+    peak_cnts, _ = param_utils.get_seqs_cts(genome, bw, peaks, args.inputlen, args.outputlen)
+    nonpeak_cnts, nonpeak_seqs = param_utils.get_seqs_cts(genome, bw, nonpeaks, args.inputlen, args.outputlen)    
     assert(len(peak_cnts) == peaks.shape[0])
     assert(len(nonpeak_cnts) == nonpeaks.shape[0])
-    logging.debug("Chromosome-level parallel processing completed successfully")
 
 
     if args.negative_sampling_ratio > 0:
