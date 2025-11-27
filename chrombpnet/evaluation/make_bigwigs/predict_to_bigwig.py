@@ -103,6 +103,7 @@ def parse_args():
     parser.add_argument("-t", "--tqdm", type=int,default=0, help="Use tqdm. If yes then you need to have it installed.")
     parser.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
     parser.add_argument("-bw", "--bigwig", type=str, default=None, help="If provided .h5 with predictions are output along with calculated metrics considering bigwig as groundtruth.")
+    parser.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
     args = parser.parse_args()
     assert (args.bias_model is None) + (args.chrombpnet_model is None) + (args.chrombpnet_model_nb is None) < 3, "No input model provided!"
     print(args)
@@ -144,10 +145,18 @@ def main(args):
             regions = [x for x in regions if x[0]==args.debug_chr]
         regions_df[regions_used].to_csv(args.output_prefix + "_chrombpnet_nobias_preds.bed", sep="\t", header=False, index=False)
 
-
-        pred_logits_wo_bias, pred_logcts_wo_bias = model_chrombpnet_nb.predict([seqs],
-                                          batch_size = args.batch_size,
-                                          verbose=True)
+        # Check if model has 2 inputs (dynamic scaling model)
+        if len(model_chrombpnet_nb.inputs) == 2:
+            # 2-input model: provide scaling factors
+            scaling_factors = np.full((len(seqs), 1), args.scaling_factor, dtype=np.float32)
+            pred_logits_wo_bias, pred_logcts_wo_bias = model_chrombpnet_nb.predict([seqs, scaling_factors],
+                                              batch_size = args.batch_size,
+                                              verbose=True)
+        else:
+            # 1-input model: standard prediction
+            pred_logits_wo_bias, pred_logcts_wo_bias = model_chrombpnet_nb.predict([seqs],
+                                              batch_size = args.batch_size,
+                                              verbose=True)
 
         pred_logits_wo_bias = np.squeeze(pred_logits_wo_bias)
 
@@ -184,7 +193,16 @@ def main(args):
             regions_df = regions_df[regions_df['chr'].isin(args.debug_chr)]
             regions = [x for x in regions if x[0]==args.debug_chr]
 
-        pred_logits, pred_logcts = model_chrombpnet.predict([seqs],
+        # Check if model has 2 inputs (dynamic scaling model)
+        if len(model_chrombpnet.inputs) == 2:
+            # 2-input model: provide scaling factors
+            scaling_factors = np.full((len(seqs), 1), args.scaling_factor, dtype=np.float32)
+            pred_logits, pred_logcts = model_chrombpnet.predict([seqs, scaling_factors],
+                                          batch_size = args.batch_size,
+                                          verbose=True)
+        else:
+            # 1-input model: standard prediction
+            pred_logits, pred_logcts = model_chrombpnet.predict([seqs],
                                           batch_size = args.batch_size,
                                           verbose=True)
 
@@ -223,8 +241,16 @@ def main(args):
             regions_df = regions_df[regions_df['chr'].isin(args.debug_chr)]
             regions = [x for x in regions if x[0]==args.debug_chr]
 
-
-        pred_bias_logits, pred_bias_logcts = model_bias.predict(seqs,
+        # Check if model has 2 inputs (dynamic scaling model)
+        if len(model_bias.inputs) == 2:
+            # 2-input model: provide scaling factors
+            scaling_factors = np.full((len(seqs), 1), args.scaling_factor, dtype=np.float32)
+            pred_bias_logits, pred_bias_logcts = model_bias.predict([seqs, scaling_factors],
+                                          batch_size = args.batch_size,
+                                          verbose=True)
+        else:
+            # 1-input model: standard prediction
+            pred_bias_logits, pred_bias_logcts = model_bias.predict(seqs,
                                           batch_size = args.batch_size,
                                           verbose=True)
 

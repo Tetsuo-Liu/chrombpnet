@@ -240,6 +240,7 @@ def read_parser():
         optional_preds.add_argument("-t", "--tqdm", type=int,default=1, help="Use tqdm. If yes then you need to have it installed.")
         optional_preds.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
         optional_preds.add_argument("-bw", "--bigwig", type=str, default=None, help="If provided .h5 with predictions are output along with calculated metrics considering bigwig as groundtruth.")
+        optional_preds.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
        
         # Make contribution score bigwigs
         
@@ -257,6 +258,7 @@ def read_parser():
         optional_contribs.add_argument("-os", "--output-prefix-stats", type=str, default=None, required=False, help="Output stats on bigwig")
         optional_contribs.add_argument("-t", "--tqdm", type=int,default=1, help="Use tqdm. If yes then you need to have it installed.")
         optional_contribs.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
+        optional_contribs.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
     
    
         # Get marginal footprints
@@ -274,6 +276,7 @@ def read_parser():
         
         optional_ftps.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for prediction")
         optional_ftps.add_argument("--ylim",default=None,type=tuple, required=False,help="lower and upper y-limits for plotting the motif footprint, in the form of a tuple i.e. \n        (0,0.8). If this is set to None, ylim will be autodetermined.")
+        optional_ftps.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
   
         # Do variant scoring
         

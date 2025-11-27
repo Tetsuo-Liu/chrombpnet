@@ -44,6 +44,7 @@ def fetch_footprinting_args():
     parser.add_argument("-pwm_f", "--motifs_to_pwm", type=str, required=True, help="Path to a TSV file containing motifs in first column and motif string to use for footprinting in second column")    
     parser.add_argument("--ylim",default=None,type=tuple, required=False,help="lower and upper y-limits for plotting the motif footprint, in the form of a tuple i.e. \
     (0,0.8). If this is set to None, ylim will be autodetermined.")
+    parser.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
     
     args = parser.parse_args()
     return args
@@ -52,7 +53,7 @@ def softmax(x, temp=1):
     norm_x = x - np.mean(x,axis=1, keepdims=True)
     return np.exp(temp*norm_x)/np.sum(np.exp(temp*norm_x), axis=1, keepdims=True)
 
-def get_footprint_for_motif(seqs, motif, model, inputlen, batch_size):
+def get_footprint_for_motif(seqs, motif, model, inputlen, batch_size, scaling_factor=1.0):
     '''
     Returns footprints for a given motif. Motif is inserted in both the actual sequence and reverse complemented version.
     seqs input is already assumed to be one-hot encoded. motif is in sequence format.
@@ -62,13 +63,24 @@ def get_footprint_for_motif(seqs, motif, model, inputlen, batch_size):
     w_mot_seqs = seqs.copy()
     w_mot_seqs[:, midpoint-len(motif)//2:midpoint-len(motif)//2+len(motif)] = one_hot.dna_to_one_hot([motif])
 
+    # Check if model has 2 inputs (dynamic scaling model)
+    is_2input_model = len(model.inputs) == 2
+    
     # midpoint of motif is the midpoint of sequence
-    pred_output=model.predict(w_mot_seqs, batch_size=batch_size, verbose=True)
+    if is_2input_model:
+        scaling_factors = np.full((len(w_mot_seqs), 1), scaling_factor, dtype=np.float32)
+        pred_output=model.predict([w_mot_seqs, scaling_factors], batch_size=batch_size, verbose=True)
+    else:
+        pred_output=model.predict(w_mot_seqs, batch_size=batch_size, verbose=True)
     footprint_for_motif_fwd = softmax(pred_output[0])*(np.exp(pred_output[1])-1)
 
     # reverse complement the sequence
     w_mot_seqs_revc = w_mot_seqs[:, ::-1, ::-1]
-    pred_output_rev=model.predict(w_mot_seqs_revc, batch_size=batch_size, verbose=True)
+    if is_2input_model:
+        scaling_factors_revc = np.full((len(w_mot_seqs_revc), 1), scaling_factor, dtype=np.float32)
+        pred_output_rev=model.predict([w_mot_seqs_revc, scaling_factors_revc], batch_size=batch_size, verbose=True)
+    else:
+        pred_output_rev=model.predict(w_mot_seqs_revc, batch_size=batch_size, verbose=True)
     footprint_for_motif_rev = softmax(pred_output_rev[0])*(np.exp(pred_output_rev[1])-1)
 
     # add fwd sequence predictions and reverse sesquence predictions (not we flip the rev predictions)
@@ -85,10 +97,19 @@ def main(args):
 	genome_fasta = pyfaidx.Fasta(args.genome)
 
 	model=load_model_wrapper(args)
-	inputlen = model.input_shape[1] 
+	# Handle both 1-input and 2-input models
+	if len(model.inputs) == 2:
+		inputlen = model.inputs[0].shape[1]
+	else:
+		inputlen = model.input_shape[1]
 	outputlen = model.output_shape[0][1] 
 	print("inferred model inputlen: ", inputlen)
 	print("inferred model outputlen: ", outputlen)
+	
+	# Check if model has 2 inputs
+	is_2input_model = len(model.inputs) == 2
+	if is_2input_model:
+		print(f"Detected 2-input model, using scaling_factor={args.scaling_factor}")
 
 	splits_dict = json.load(open(args.chr_fold_path))
 	chroms_to_keep = set(splits_dict["test"])
@@ -105,7 +126,7 @@ def main(args):
 	motif_to_insert_fwd = ""
 	print("inserting motif: ", motif)
 	print(motif_to_insert_fwd)
-	motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size)
+	motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size, args.scaling_factor)
 	footprints_at_motifs[motif]=[motif_footprint,motif_counts]
 
 	plt.figure()
@@ -125,7 +146,7 @@ def main(args):
 		motif_to_insert_fwd=row["MOTIF_PWM_FWD"]        
 		print("inserting motif: ", motif)
 		print(motif_to_insert_fwd)
-		motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size)
+		motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size, args.scaling_factor)
 		footprints_at_motifs[motif]=[motif_footprint,motif_counts]
 
 		# plot footprints of center 200bp

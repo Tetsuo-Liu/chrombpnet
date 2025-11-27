@@ -34,6 +34,7 @@ def fetch_interpret_args():
     parser.add_argument("-p", "--profile_or_counts", nargs="+", type=str, default=["counts", "profile"], choices=["counts", "profile"],
                         help="use either counts or profile or both for running shap")
     parser.add_argument("--chunk-size", type=int, default=None, help="Chunk size for memory-efficient processing (auto-detect if not specified)")
+    parser.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
 
     args = parser.parse_args()
     return args
@@ -96,12 +97,17 @@ def combine_chunk_results(chunk_results):
     
     return combined
 
-def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=None):
+def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0):
     """
     Perform interpretation with chunked processing for memory efficiency.
     """
     total_sequences = len(seqs)
     print(f"Seqs dimension : {seqs.shape}")
+    
+    # Check if model has 2 inputs (dynamic scaling model)
+    is_2input_model = len(model.inputs) == 2
+    if is_2input_model:
+        logging.info(f"Detected 2-input model, using scaling_factor={scaling_factor}")
     
     # Calculate optimal chunk size if not provided
     if chunk_size is None:
@@ -114,18 +120,33 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
     
     if "counts" in profile_or_counts:
         logging.info("Initializing counts explainer...")
-        explainers['counts'] = shap.explainers.deep.TFDeepExplainer(
-            (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
-            shap_utils.shuffle_several_times,
-            combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        if is_2input_model:
+            # For 2-input models, use first input (sequence) only for SHAP
+            # Scaling factor is constant and doesn't affect gradients
+            explainers['counts'] = shap.explainers.deep.TFDeepExplainer(
+                (model.inputs[0], tf.reduce_sum(model.outputs[1], axis=-1)),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        else:
+            explainers['counts'] = shap.explainers.deep.TFDeepExplainer(
+                (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
     
     if "profile" in profile_or_counts:
         logging.info("Initializing profile explainer...")
         weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
-        explainers['profile'] = shap.explainers.deep.TFDeepExplainer(
-            (model.input, weightedsum_meannormed_logits),
-            shap_utils.shuffle_several_times,
-            combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        if is_2input_model:
+            # For 2-input models, use first input (sequence) only for SHAP
+            explainers['profile'] = shap.explainers.deep.TFDeepExplainer(
+                (model.inputs[0], weightedsum_meannormed_logits),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        else:
+            explainers['profile'] = shap.explainers.deep.TFDeepExplainer(
+                (model.input, weightedsum_meannormed_logits),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
     
     # Process in chunks
     all_results = {'counts': [], 'profile': []}
@@ -144,6 +165,8 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
         if "counts" in profile_or_counts:
             print(f"Generating 'counts' shap scores for chunk {chunk_idx + 1}/{num_chunks}")
             try:
+                # For 2-input models, SHAP explainer uses only sequence input
+                # The scaling factor is constant and doesn't affect gradients
                 counts_shap_scores = explainers['counts'].shap_values(
                     chunk_seqs, progress_message=max(1, chunk_size_actual // 20))
                 
@@ -161,6 +184,7 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
         if "profile" in profile_or_counts:
             print(f"Generating 'profile' shap scores for chunk {chunk_idx + 1}/{num_chunks}")
             try:
+                # For 2-input models, SHAP explainer uses only sequence input
                 profile_shap_scores = explainers['profile'].shap_values(
                     chunk_seqs, progress_message=max(1, chunk_size_actual // 20))
                 
@@ -193,7 +217,7 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
         dd.io.save(f"{output_prefix}.profile_scores.h5", combined_profile, compression='blosc')
         logging.info(f"Profile scores saved to {output_prefix}.profile_scores.h5")
 
-def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None):
+def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0):
     """
     Wrapper function to maintain backward compatibility.
     Uses chunked processing for large datasets.
@@ -201,16 +225,27 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None):
     # Use chunked processing for datasets larger than 1000 sequences
     if len(seqs) > 1000:
         logging.info(f"Large dataset detected ({len(seqs)} sequences), using chunked processing")
-        return interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size)
+        return interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor)
     
     # Original implementation for smaller datasets
     print("Seqs dimension : {}".format(seqs.shape))
+    
+    # Check if model has 2 inputs (dynamic scaling model)
+    is_2input_model = len(model.inputs) == 2
+    if is_2input_model:
+        logging.info(f"Detected 2-input model, using scaling_factor={scaling_factor}")
 
     if "counts" in profile_or_counts:
-        profile_model_counts_explainer = shap.explainers.deep.TFDeepExplainer(
-            (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
-            shap_utils.shuffle_several_times,
-            combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        if is_2input_model:
+            profile_model_counts_explainer = shap.explainers.deep.TFDeepExplainer(
+                (model.inputs[0], tf.reduce_sum(model.outputs[1], axis=-1)),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        else:
+            profile_model_counts_explainer = shap.explainers.deep.TFDeepExplainer(
+                (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
 
         print("Generating 'counts' shap scores")
         counts_shap_scores = profile_model_counts_explainer.shap_values(
@@ -227,10 +262,16 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None):
 
     if "profile" in profile_or_counts:
         weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
-        profile_model_profile_explainer = shap.explainers.deep.TFDeepExplainer(
-            (model.input, weightedsum_meannormed_logits),
-            shap_utils.shuffle_several_times,
-            combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        if is_2input_model:
+            profile_model_profile_explainer = shap.explainers.deep.TFDeepExplainer(
+                (model.inputs[0], weightedsum_meannormed_logits),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
+        else:
+            profile_model_profile_explainer = shap.explainers.deep.TFDeepExplainer(
+                (model.input, weightedsum_meannormed_logits),
+                shap_utils.shuffle_several_times,
+                combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
 
         print("Generating 'profile' shap scores")
         profile_shap_scores = profile_model_profile_explainer.shap_values(
@@ -245,7 +286,7 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None):
 
 
 def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix, 
-                     profile_or_counts=["counts", "profile"], debug_chr=None, chunk_size=None):
+                     profile_or_counts=["counts", "profile"], debug_chr=None, chunk_size=None, scaling_factor=1.0):
     """
     Core interpretation logic extracted from main().
     
@@ -257,6 +298,7 @@ def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix,
         profile_or_counts: List of analysis types to run
         debug_chr: Optional list of chromosomes for debugging
         chunk_size: Optional chunk size for memory-efficient processing
+        scaling_factor: Scaling factor for 2-input models (default: 1.0)
         
     Returns:
         dict: Information about processed regions and output files
@@ -270,7 +312,11 @@ def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix,
     model = input_utils.load_model_wrapper(model_h5_path)
 
     # infer input length
-    inputlen = model.input_shape[1] # if bias model (1 input only)
+    # Handle both 1-input and 2-input models
+    if len(model.inputs) == 2:
+        inputlen = model.inputs[0].shape[1]
+    else:
+        inputlen = model.input_shape[1]  # if bias model (1 input only)
     print("inferred model inputlen: ", inputlen)
 
     # load sequences
@@ -283,7 +329,7 @@ def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix,
 
     regions_df[peaks_used].to_csv("{}.interpreted_regions.bed".format(output_prefix), header=False, index=False, sep='\t')
 
-    interpret(model, seqs, output_prefix, profile_or_counts, chunk_size)
+    interpret(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor)
     
     return {
         'total_regions': len(regions_df),
@@ -312,7 +358,8 @@ def main(args):
         output_prefix=args.output_prefix,
         profile_or_counts=args.profile_or_counts,
         debug_chr=args.debug_chr,
-        chunk_size=getattr(args, 'chunk_size', None)
+        chunk_size=getattr(args, 'chunk_size', None),
+        scaling_factor=getattr(args, 'scaling_factor', 1.0)
     )
 
 if __name__ == '__main__':
