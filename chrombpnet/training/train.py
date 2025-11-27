@@ -17,20 +17,102 @@ os.environ['PYTHONHASHSEED'] = '0'
 def create_tf_compatible_dataset(sequence_generator):
     """
     Create TensorFlow compatible dataset from ChromBPNetBatchGenerator.
+    Supports both 1-input and 2-input models, with optional sample weights.
     Uses feature detection instead of version checking for better reliability.
     """
+    # Get a sample batch to detect the data format
+    sample_batch = sequence_generator[0]
+    
+    # Detect data format: check if it's a 3-element tuple (with sample weights)
+    has_sample_weights = isinstance(sample_batch, tuple) and len(sample_batch) == 3
+    
+    if has_sample_weights:
+        # Format: ((batch_seq, batch_scaling_factors), (batch_cts, batch_log_cts), batch_loss_weights)
+        inputs, outputs, sample_weights = sample_batch
+        
+        # Check if inputs is a tuple (2-input model) or single array (1-input model)
+        is_2input = isinstance(inputs, tuple) and len(inputs) == 2
+        
+        if is_2input:
+            # 2-input model with sample weights (celltype_aggregate generator)
+            batch_seq, batch_scaling_factors = inputs
+            # Define output signature for 2-input model with sample weights
+            output_signature = (
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                ),
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                ),
+                tf.TensorSpec(shape=(None,), dtype=tf.float32)
+            )
+        else:
+            # 1-input model with sample weights (should not happen with current generators, but handle for safety)
+            output_signature = (
+                tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                ),
+                tf.TensorSpec(shape=(None,), dtype=tf.float32)
+            )
+    else:
+        # Format: (batch_seq, (batch_cts, batch_log_cts)) - 1-input model without sample weights
+        # Check if inputs is a tuple (2-input model) or single array (1-input model)
+        inputs = sample_batch[0]
+        is_2input = isinstance(inputs, tuple) and len(inputs) == 2
+        
+        if is_2input:
+            # 2-input model without sample weights
+            output_signature = (
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                ),
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                )
+            )
+        else:
+            # 1-input model without sample weights (standard generator)
+            output_signature = (
+                tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
+                (
+                    tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
+                    tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                )
+            )
+    
     # Test if current TensorFlow requires explicit output_signature
     def test_generator():
         import numpy as np
         batch_seq = np.zeros((1, sequence_generator.inputlen, 4), dtype=np.float32)
         batch_cts = np.zeros((1, sequence_generator.outputlen), dtype=np.float32)
-        yield (batch_seq, (batch_cts, np.zeros((1, 1), dtype=np.float32)))
+        if has_sample_weights and is_2input:
+            yield ((batch_seq, np.zeros((1, 1), dtype=np.float32)), 
+                   (batch_cts, np.zeros((1, 1), dtype=np.float32)),
+                   np.zeros((1,), dtype=np.float32))
+        elif has_sample_weights:
+            yield (batch_seq, (batch_cts, np.zeros((1, 1), dtype=np.float32)), np.zeros((1,), dtype=np.float32))
+        elif is_2input:
+            yield ((batch_seq, np.zeros((1, 1), dtype=np.float32)), 
+                   (batch_cts, np.zeros((1, 1), dtype=np.float32)))
+        else:
+            yield (batch_seq, (batch_cts, np.zeros((1, 1), dtype=np.float32)))
     
     # Try to create dataset without explicit output_signature
     try:
         test_dataset = tf.data.Dataset.from_generator(test_generator)
-        # If successful, use legacy approach
-        return sequence_generator
+        # If successful, use legacy approach (return generator directly)
+        # Note: For generators with sample weights, we still need explicit signature
+        if has_sample_weights:
+            # Must use explicit signature for sample weights
+            pass
+        else:
+            return sequence_generator
     except (TypeError, ValueError):
         # If failed, use explicit output_signature approach
         pass
@@ -39,15 +121,6 @@ def create_tf_compatible_dataset(sequence_generator):
     def generator_func():
         for i in range(len(sequence_generator)):
             yield sequence_generator[i]
-    
-    # Define explicit output signature based on generator properties
-    output_signature = (
-        tf.TensorSpec(shape=(None, sequence_generator.inputlen, 4), dtype=tf.float32),
-        (
-            tf.TensorSpec(shape=(None, sequence_generator.outputlen), dtype=tf.float32),
-            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
-        )
-    )
     
     dataset = tf.data.Dataset.from_generator(
         generator_func,
@@ -82,11 +155,28 @@ def fit_and_evaluate(model,train_gen,valid_gen,args,architecture_module):
     train_data = create_tf_compatible_dataset(train_gen)
     valid_data = create_tf_compatible_dataset(valid_gen)
     
-    model.fit(train_data,
-              validation_data=valid_data,
-              epochs=args.epochs,
-              verbose=1,
-              callbacks=cur_callbacks)
+    # Check if generators return sample weights (3-element tuple)
+    sample_batch = train_gen[0]
+    has_sample_weights = isinstance(sample_batch, tuple) and len(sample_batch) == 3
+    
+    if has_sample_weights:
+        # Extract sample weights from dataset
+        # For tf.data.Dataset, we need to handle sample weights separately
+        # Keras model.fit() supports sample_weight parameter
+        # However, when using tf.data.Dataset with sample weights in the tuple,
+        # Keras automatically extracts them if the dataset returns (x, y, sample_weight)
+        model.fit(train_data,
+                  validation_data=valid_data,
+                  epochs=args.epochs,
+                  verbose=1,
+                  callbacks=cur_callbacks)
+    else:
+        # Standard format without sample weights
+        model.fit(train_data,
+                  validation_data=valid_data,
+                  epochs=args.epochs,
+                  verbose=1,
+                  callbacks=cur_callbacks)
 
     print('save model') 
     model.save(model_output_path_h5_name)

@@ -125,9 +125,10 @@ def read_parser():
         optional_main_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
 
         # DP model specific arguments
-        optional_main_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic'], default='standard', help='Data generator type for training')
+        optional_main_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate'], default='standard', help='Data generator type for training')
         optional_main_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
-        optional_main_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic)')
+        optional_main_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate)')
+        optional_main_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic and celltype_aggregate)')
  
          # chrombpnet pipeline arguments
 		
@@ -146,9 +147,10 @@ def read_parser():
         optional_pipeline_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
 
         # DP model specific arguments
-        optional_pipeline_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic'], default='standard', help='Data generator type for training')
+        optional_pipeline_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate'], default='standard', help='Data generator type for training')
         optional_pipeline_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
-        optional_pipeline_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic)')
+        optional_pipeline_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate)')
+        optional_pipeline_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic and celltype_aggregate)')
  
         # chrombpnet model qc arguments
 

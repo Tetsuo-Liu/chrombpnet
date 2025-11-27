@@ -1,6 +1,6 @@
 import numpy as np ;
 from tensorflow.keras.backend import int_shape
-from tensorflow.keras.layers import Input, Cropping1D, add, Conv1D, GlobalAvgPool1D, Dense, Add, Concatenate, Lambda, Flatten
+from tensorflow.keras.layers import Input, Cropping1D, add, Conv1D, GlobalAvgPool1D, Dense, Add, Concatenate, Lambda, Flatten, Multiply
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Model
 from chrombpnet.training.utils.losses import multinomial_nll
@@ -99,6 +99,9 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
     sequence_len=int(model_params['inputlen'])
     out_pred_len=int(model_params['outputlen'])
 
+    # Check if dynamic scaling is enabled (for celltype_aggregate generator)
+    # This is determined by checking if data_generator_type is 'celltype_aggregate'
+    use_dynamic_scaling = hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate'
 
     bias_model = load_pretrained_bias(bias_model_path)
     bpnet_model_wo_bias = bpnet_model(filters, n_dil_layers, sequence_len, out_pred_len)
@@ -109,27 +112,65 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
     tf.random.set_seed(seed)
     rn.seed(seed)
     
-    inp = Input(shape=(sequence_len, 4),name='sequence')    
+    # Define inputs: sequence is always required, scaling_factor is optional
+    inp_seq = Input(shape=(sequence_len, 4), name='sequence')
+    
+    if use_dynamic_scaling:
+        # For celltype_aggregate generator: 2-input model with dynamic bias scaling
+        inp_scale = Input(shape=(1,), name='scaling_factor')
+        
+        ## get bias output (using sequence input)
+        bias_output = bias_model(inp_seq)
+        ## get wo bias output (using sequence input)
+        output_wo_bias = bpnet_model_wo_bias(inp_seq)
+        
+        assert(len(bias_output[1].shape)==2) # bias model counts head is of incorrect shape (None,1) expected
+        assert(len(bias_output[0].shape)==2) # bias model profile head is of incorrect shape (None,out_pred_len) expected
+        assert(len(output_wo_bias[0].shape)==2)
+        assert(len(output_wo_bias[1].shape)==2)
+        assert(bias_output[1].shape[1]==1) #  bias model counts head is of incorrect shape (None,1) expected
+        assert(bias_output[0].shape[1]==out_pred_len) # bias model profile head is of incorrect shape (None,out_pred_len) expected
+        
+        # Apply dynamic scaling to bias outputs
+        # Profile: scale in linear space (multiply)
+        scaled_bias_profile = Multiply(name="scaled_bias_profile_logits")([bias_output[0], inp_scale])
+        # Counts: scale in log space (add log of scaling factor)
+        scaled_bias_logcounts = Lambda(
+            lambda x: x[0] + tf.math.log(x[1] + 1e-6),
+            name="scaled_bias_logcounts"
+        )([bias_output[1], inp_scale])
+        
+        # Combine scaled bias with TF model outputs
+        profile_out = Add(name="logits_profile_predictions")([output_wo_bias[0], scaled_bias_profile])
+        concat_counts = Concatenate(axis=-1)([output_wo_bias[1], scaled_bias_logcounts])
+        count_out = Lambda(lambda x: tf.math.reduce_logsumexp(x, axis=-1, keepdims=True),
+                            name="logcount_predictions")(concat_counts)
+        
+        # Instantiate keras Model with 2 inputs
+        model = Model(inputs=[inp_seq, inp_scale], outputs=[profile_out, count_out])
+    else:
+        # For standard/weighted_dynamic generators: 1-input model (backward compatible)
+        inp = inp_seq  # Use same input variable name for compatibility
+        
+        ## get bias output
+        bias_output = bias_model(inp)
+        ## get wo bias output
+        output_wo_bias = bpnet_model_wo_bias(inp)
+        assert(len(bias_output[1].shape)==2) # bias model counts head is of incorrect shape (None,1) expected
+        assert(len(bias_output[0].shape)==2) # bias model profile head is of incorrect shape (None,out_pred_len) expected
+        assert(len(output_wo_bias[0].shape)==2)
+        assert(len(output_wo_bias[1].shape)==2)
+        assert(bias_output[1].shape[1]==1) #  bias model counts head is of incorrect shape (None,1) expected
+        assert(bias_output[0].shape[1]==out_pred_len) # bias model profile head is of incorrect shape (None,out_pred_len) expected
 
-    ## get bias output
-    bias_output=bias_model(inp)
-    ## get wo bias output
-    output_wo_bias=bpnet_model_wo_bias(inp)
-    assert(len(bias_output[1].shape)==2) # bias model counts head is of incorrect shape (None,1) expected
-    assert(len(bias_output[0].shape)==2) # bias model profile head is of incorrect shape (None,out_pred_len) expected
-    assert(len(output_wo_bias[0].shape)==2)
-    assert(len(output_wo_bias[1].shape)==2)
-    assert(bias_output[1].shape[1]==1) #  bias model counts head is of incorrect shape (None,1) expected
-    assert(bias_output[0].shape[1]==out_pred_len) # bias model profile head is of incorrect shape (None,out_pred_len) expected
+        # Standard combination without scaling
+        profile_out = Add(name="logits_profile_predictions")([output_wo_bias[0], bias_output[0]])
+        concat_counts = Concatenate(axis=-1)([output_wo_bias[1], bias_output[1]])
+        count_out = Lambda(lambda x: tf.math.reduce_logsumexp(x, axis=-1, keepdims=True),
+                            name="logcount_predictions")(concat_counts)
 
-
-    profile_out = Add(name="logits_profile_predictions")([output_wo_bias[0],bias_output[0]])
-    concat_counts = Concatenate(axis=-1)([output_wo_bias[1], bias_output[1]])
-    count_out = Lambda(lambda x: tf.math.reduce_logsumexp(x, axis=-1, keepdims=True),
-                        name="logcount_predictions")(concat_counts)
-
-    # instantiate keras Model with inputs and outputs
-    model=Model(inputs=[inp],outputs=[profile_out, count_out])
+        # Instantiate keras Model with 1 input (backward compatible)
+        model = Model(inputs=[inp], outputs=[profile_out, count_out])
 
     model.compile(optimizer=Adam(learning_rate=args.learning_rate),
                     loss=[multinomial_nll,'mse'],
@@ -139,8 +180,16 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
 
 
 def save_model_without_bias(model, output_prefix):
+    """
+    Extract and save the TF model without bias component.
+    Works for both 1-input and 2-input models.
+    For 2-input models, only the sequence input is used (scaling_factor is not needed for TF-only predictions).
+    """
     model_wo_bias = model.get_layer("model_wo_bias").output
     #counts_output_without_bias = model.get_layer("wo_bias_bpnet_logcount_predictions").output
-    model_without_bias = Model(inputs=model.get_layer("model_wo_bias").inputs,outputs=[model_wo_bias[0], model_wo_bias[1]])
+    
+    # Get inputs from model_wo_bias (always single input: sequence only)
+    # This works for both 1-input and 2-input parent models
+    model_without_bias = Model(inputs=model.get_layer("model_wo_bias").inputs, outputs=[model_wo_bias[0], model_wo_bias[1]])
     print('save model without bias') 
     model_without_bias.save(output_prefix+"_nobias.h5")
