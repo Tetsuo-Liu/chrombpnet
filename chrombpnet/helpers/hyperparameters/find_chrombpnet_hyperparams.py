@@ -29,6 +29,7 @@ def parse_model_args(parser):
     parser.add_argument("-dil", "--n-dilation-layers", type=int, default=8, help="Number of dilation layers to use in chrombpnet model")
     parser.add_argument("-b", "--bias-model-path", type=str, required=True, help="path of bias model")
     parser.add_argument("-op", "--output-prefix", help="output prefix for storing hyper-param TSV for chrombpnet")
+    parser.add_argument("--data-generator-type", type=str, default=None, help="Data generator type (celltype_aggregate skips bias scaling)")
     args = parser.parse_args()
     return args
 
@@ -138,12 +139,23 @@ def main(args):
         counts_loss_weight = 1.0
         print("WARNING: you are training on low-read depth data")
 
-    # adjust bias model for training  - using train and validation set
-    # the bias model might be trained on a difference read depth compared to the given data - so this step scales the bias model to account for that
-    bias_model = param_utils.load_model_wrapper(args.bias_model_path)
-    bias_model_scaled = adjust_bias_model_logcounts(bias_model, nonpeak_seqs[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)], nonpeak_cnts[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)])
-    # save the new bias model
-    bias_model_scaled.save("{}bias_model_scaled.h5".format(args.output_prefix))
+    # Check if celltype_aggregate mode is enabled
+    # In celltype_aggregate mode, bias model scaling is not needed because:
+    # 1. Non-peak regions use the same aggregated_all.bw as bias model training
+    # 2. Peak regions use dynamic scaling during training
+    use_celltype_aggregate = hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate'
+    
+    if use_celltype_aggregate:
+        print("celltype_aggregate mode detected: Skipping bias model scaling (using original bias model)")
+        bias_model_path_to_use = args.bias_model_path
+    else:
+        # adjust bias model for training  - using train and validation set
+        # the bias model might be trained on a difference read depth compared to the given data - so this step scales the bias model to account for that
+        bias_model = param_utils.load_model_wrapper(args.bias_model_path)
+        bias_model_scaled = adjust_bias_model_logcounts(bias_model, nonpeak_seqs[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)], nonpeak_cnts[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)])
+        # save the new bias model
+        bias_model_scaled.save("{}bias_model_scaled.h5".format(args.output_prefix))
+        bias_model_path_to_use = "{}bias_model_scaled.h5".format(args.output_prefix)
 
     # store the parameters being used  - in a TSV file
     file = open("{}chrombpnet_data_params.tsv".format(args.output_prefix),"w")
@@ -162,7 +174,7 @@ def main(args):
     file.write("\n")
     file.write("\t".join(["n_dil_layers", str(args.n_dilation_layers)]))
     file.write("\n")
-    file.write("\t".join(["bias_model_path", "{}bias_model_scaled.h5".format(args.output_prefix)]))
+    file.write("\t".join(["bias_model_path", bias_model_path_to_use]))
     file.write("\n")
     file.write("\t".join(["inputlen", str(args.inputlen)]))
     file.write("\n")
