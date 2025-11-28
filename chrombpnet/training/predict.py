@@ -93,8 +93,28 @@ def predict_on_batch_wrapper(model,test_generator):
             X, y = batch_data
             coords = None
 
-        #get the model predictions            
-        preds=model.predict_on_batch(X)
+        # Check if model expects 2 inputs (dynamic scaling model)
+        # and if X is a tuple (2 inputs: sequence + scaling_factor)
+        is_2input_model = len(model.inputs) == 2
+        is_2input_data = isinstance(X, tuple) and len(X) == 2
+        
+        # Handle 2-input model case
+        if is_2input_model:
+            if is_2input_data:
+                # Model expects 2 inputs and data provides 2 inputs: use as-is
+                preds = model.predict_on_batch(X)
+            else:
+                # Model expects 2 inputs but data provides 1 input: add default scaling factor
+                # This can happen when using standard generators with 2-input models
+                batch_size = X.shape[0] if hasattr(X, 'shape') else len(X)
+                scaling_factors = np.ones((batch_size, 1), dtype=np.float32)
+                preds = model.predict_on_batch([X, scaling_factors])
+        else:
+            # 1-input model: handle both tuple and single input
+            if is_2input_data:
+                # Model expects 1 input but data provides 2 inputs: use only sequence input
+                X = X[0]  # Extract sequence input from tuple
+            preds = model.predict_on_batch(X)
 
         # get counts predictions
         true_counts.extend(y[0])

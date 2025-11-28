@@ -140,7 +140,9 @@ def process_celltype_peaks_worker(worker_args):
                         'local_idx': local_idx,
                         'sequence': seq_onehot,
                         'counts': bigwig_vals,
-                        'coords': (chrom, seq_start, seq_end),
+                        # Store coordinates in standard format: (chrom, summit, strand, peaks_flag)
+                        # For peaks: use seq_start as summit, "f" as strand, 1 as peaks_flag
+                        'coords': (chrom, seq_start, "f", "1"),
                         'scaling_factor': scaling_factor,
                         'loss_weight': loss_weight
                     })
