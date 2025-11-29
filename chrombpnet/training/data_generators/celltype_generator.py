@@ -462,8 +462,20 @@ class CelltypeGenerator(keras.utils.Sequence):
         """
         Generate (peak_index, celltype_index) pairs for the current epoch.
         
-        For training, we can use uniform sampling or weighted sampling.
-        For simplicity, we use uniform sampling across cell types.
+        Uses uniform random sampling across cell types (no weighted sampling).
+        
+        Design rationale:
+        - Loss weighting (loss_weight_normalized) already corrects for cell-type imbalance
+          at the loss calculation level, ensuring fair representation of rare cell types.
+        - Adding weighted sampling would create "double correction" that could lead to
+          overfitting on rare cell types or biased learning.
+        - Uniform sampling ensures all cell types have equal opportunity to be presented
+          to the model, while loss weights handle the imbalance correction.
+        
+        This aligns with modify_dp_ver3.md design where:
+        - Sampling (pairing) role: Present all cell types with equal opportunity per epoch
+        - Loss calculation role: Use loss_weight_normalized to emphasize learning from
+          cell types with weaker signals
         """
         self.logger.info(f"Generating pairs for {len(self.peak_regions)} peaks...")
         
@@ -1015,6 +1027,25 @@ class CelltypeGenerator(keras.utils.Sequence):
         if self.coords_cache is None:
             return None
         return self.coords_cache.get(idx, None)
+    
+    def get_celltype_indices(self, idx):
+        """
+        Get celltype indices for a specific batch index.
+        Only available if multitask_mode=True.
+        
+        Args:
+            idx: Batch index
+            
+        Returns:
+            Celltype indices array for the batch, or None if multitask_mode=False or not available
+        """
+        if not self.multitask_mode:
+            return None
+        if not hasattr(self, 'cur_celltype_indices'):
+            return None
+        start_idx = idx * self.batch_size
+        end_idx = (idx + 1) * self.batch_size
+        return self.cur_celltype_indices[start_idx:end_idx]
     
     def on_epoch_end(self):
         """

@@ -128,6 +128,10 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
         is_2input_model = len(model.inputs) == 2
         is_2input_data = isinstance(X, tuple) and len(X) == 2
         
+        # Check if multitask model (multiple outputs or dictionary targets)
+        is_multitask_model = len(model.outputs) > 2
+        is_multitask_targets = isinstance(y, dict)
+        
         # Handle 2-input model case
         if is_2input_model:
             if is_2input_data:
@@ -145,13 +149,95 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                 X = X[0]  # Extract sequence input from tuple
             preds = model.predict_on_batch(X)
 
-        # get counts predictions
-        true_counts.extend(y[0])
-        profile_probs_predictions.extend(softmax(preds[0]))
+        # Handle multitask model predictions
+        if is_multitask_model and is_multitask_targets:
+            # Get celltype indices for this batch
+            batch_celltype_indices = None
+            if hasattr(data_generator, 'get_celltype_indices'):
+                batch_celltype_indices = data_generator.get_celltype_indices(idx)
+            
+            # Extract celltype names from model output names (more reliable than target keys)
+            # Model outputs are ordered as: [profile_1, ..., profile_N, count_1, ..., count_N]
+            # where N is the number of celltypes
+            celltype_names = []
+            celltype_to_profile_idx = {}
+            celltype_to_count_idx = {}
+            
+            # Get celltype order from model output names
+            num_celltypes = len(model.outputs) // 2
+            for i, output_layer in enumerate(model.outputs):
+                output_name = output_layer.name
+                if output_name.startswith('logits_profile_'):
+                    celltype_name = output_name.replace('logits_profile_', '')
+                    if celltype_name not in celltype_names:
+                        celltype_names.append(celltype_name)
+                    celltype_to_profile_idx[celltype_name] = i
+                elif output_name.startswith('logcount_'):
+                    celltype_name = output_name.replace('logcount_', '')
+                    celltype_to_count_idx[celltype_name] = i
+            
+            # Get index-to-celltype mapping from generator if available
+            index_to_celltype = None
+            if hasattr(data_generator, 'index_to_celltype'):
+                index_to_celltype = data_generator.index_to_celltype
+            
+            # For each sample, find the correct celltype and extract corresponding predictions
+            batch_size = len(list(y.values())[0])
+            
+            # Extract predictions for each sample based on its celltype
+            batch_true_counts = []
+            batch_profile_preds = []
+            batch_true_counts_sum = []
+            batch_counts_preds = []
+            
+            for i in range(batch_size):
+                # Find the correct celltype for this sample
+                sample_celltype_name = None
+                if batch_celltype_indices is not None and index_to_celltype is not None:
+                    celltype_idx = batch_celltype_indices[i]
+                    if celltype_idx >= 0 and celltype_idx in index_to_celltype:
+                        sample_celltype_name = index_to_celltype[celltype_idx]
+                
+                # If celltype not found, try to find non-zero target
+                if sample_celltype_name is None:
+                    for celltype_name in celltype_names:
+                        profile_key = f'logits_profile_{celltype_name}'
+                        if profile_key in y and np.any(y[profile_key][i] != 0):
+                            sample_celltype_name = celltype_name
+                            break
+                
+                # Default to first celltype if still not found
+                if sample_celltype_name is None:
+                    sample_celltype_name = celltype_names[0]
+                
+                # Extract true labels for this celltype
+                profile_key = f'logits_profile_{sample_celltype_name}'
+                count_key = f'logcount_{sample_celltype_name}'
+                
+                batch_true_counts.append(y[profile_key][i])
+                batch_true_counts_sum.append(y[count_key][i, 0])
+                
+                # Extract predictions for this celltype
+                profile_idx = celltype_to_profile_idx[sample_celltype_name]
+                count_idx = celltype_to_count_idx[sample_celltype_name]
+                
+                batch_profile_preds.append(preds[profile_idx][i])
+                batch_counts_preds.append(preds[count_idx][i, 0])
+            
+            # Convert to arrays and extend lists
+            true_counts.extend(batch_true_counts)
+            profile_probs_predictions.extend(softmax(np.array(batch_profile_preds)))
+            true_counts_sum.extend(batch_true_counts_sum)
+            counts_sum_predictions.extend(batch_counts_preds)
+        else:
+            # Standard single-task model
+            # get counts predictions
+            true_counts.extend(y[0])
+            profile_probs_predictions.extend(softmax(preds[0]))
 
-        # get profile predictions
-        true_counts_sum.extend(y[1][:,0])
-        counts_sum_predictions.extend(preds[1][:,0])
+            # get profile predictions
+            true_counts_sum.extend(y[1][:,0])
+            counts_sum_predictions.extend(preds[1][:,0])
         
         if coords is not None:
             coordinates.extend(coords)
