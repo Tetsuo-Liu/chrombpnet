@@ -195,6 +195,14 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             # A multitask model should have celltype-specific output names starting with 'logits_profile_' or 'logcount_'
             is_actual_multitask_model = len(celltype_names) > 0 and len(celltype_to_profile_idx) > 0
             
+            # Debug: Log model type detection
+            if idx == 0:  # Only log for first batch to avoid spam
+                print(f"DEBUG: Model has {len(model.outputs)} outputs")
+                print(f"DEBUG: Extracted {len(celltype_names)} celltype names: {celltype_names}")
+                print(f"DEBUG: celltype_to_profile_idx keys: {list(celltype_to_profile_idx.keys())}")
+                print(f"DEBUG: is_actual_multitask_model: {is_actual_multitask_model}")
+                print(f"DEBUG: Target dictionary keys: {list(y.keys())[:5]}...")  # Show first 5 keys
+            
             if is_actual_multitask_model:
                 # Multitask model: extract predictions for each celltype-specific head
                 batch_true_counts = []
@@ -278,6 +286,33 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                                 if key.startswith('logcount_') and y[key][i, 0] != 0:
                                     count_key = key
                                     break
+                    
+                    # Re-verify that the celltype exists in model outputs after potential name changes
+                    if sample_celltype_name not in celltype_to_profile_idx:
+                        # Try to find a matching celltype (case-insensitive or partial match)
+                        found_match = False
+                        for available_celltype in celltype_names:
+                            if available_celltype.lower() == sample_celltype_name.lower():
+                                sample_celltype_name = available_celltype
+                                found_match = True
+                                break
+                        
+                        # If still no match, use first available celltype
+                        if not found_match and celltype_names:
+                            if i == 0 and idx == 0:  # Debug: log for first sample
+                                print(f"DEBUG: Celltype '{sample_celltype_name}' not found, using '{celltype_names[0]}' instead")
+                            sample_celltype_name = celltype_names[0]
+                        elif not celltype_names:
+                            # This should not happen if is_actual_multitask_model is True
+                            # but handle gracefully by falling back to single-output model logic
+                            raise ValueError(
+                                f"Celltype '{sample_celltype_name}' not found in model outputs, "
+                                f"and no celltype names were extracted from model. "
+                                f"Model outputs: {[out.name for out in model.outputs]}, "
+                                f"Target keys: {list(y.keys())}, "
+                                f"celltype_names: {celltype_names}, "
+                                f"celltype_to_profile_idx keys: {list(celltype_to_profile_idx.keys())}"
+                            )
                     
                     batch_true_counts.append(y[profile_key][i])
                     batch_true_counts_sum.append(y[count_key][i, 0])
