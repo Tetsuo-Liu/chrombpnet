@@ -42,6 +42,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
+import itertools
 
 # Global variables for worker processes (following ChromBPNet patterns)
 genome_obj = None
@@ -430,7 +431,12 @@ class CelltypeGenerator(keras.utils.Sequence):
         
     def _create_fixed_validation_set(self):
         """
-        Create fixed validation set with deterministic cell-type pairing.
+        Create fixed validation set with all peak-celltype pairings.
+        
+        For proper generalization evaluation, each validation peak is paired with
+        all cell types. This ensures the model is evaluated on the same diverse
+        task distribution as during training, preventing shortcut learning where
+        the model memorizes fixed peak-celltype associations.
         """
         if self.peak_regions is None or len(self.peak_regions) == 0:
             self.peak_seqs = None
@@ -440,20 +446,20 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.peak_loss_weights = None
             return
             
-        self.logger.info("Creating fixed validation set...")
+        self.logger.info("Creating fixed validation set with all peak-celltype pairings...")
         
-        # Create fixed (peak, celltype) pairs deterministically
-        # Cycle through cell types for each peak
+        # Create all possible (peak, celltype) pairs for comprehensive evaluation
+        # This ensures validation evaluates generalization across all cell types,
+        # matching the training distribution where any peak can be paired with any cell type
+        peak_indices = list(range(len(self.peak_regions)))
         celltype_indices = list(range(len(self.celltype_metadata)))
-        validation_pairs = []
-        
-        for peak_idx in range(len(self.peak_regions)):
-            # Cycle through cell types deterministically
-            celltype_idx = peak_idx % len(celltype_indices)
-            validation_pairs.append((peak_idx, celltype_idx))
+        validation_pairs = list(itertools.product(peak_indices, celltype_indices))
         
         self.fixed_validation_pairs = validation_pairs
-        self.logger.info(f"Generated {len(validation_pairs)} fixed validation pairs")
+        self.logger.info(
+            f"Generated {len(validation_pairs)} fixed validation pairs "
+            f"({len(peak_indices)} peaks × {len(celltype_indices)} cell types)"
+        )
         
         # Load validation data
         self._load_peak_data()
