@@ -139,14 +139,14 @@ def main(args):
         counts_loss_weight = 1.0
         print("WARNING: you are training on low-read depth data")
 
-    # Check if celltype_aggregate mode is enabled
-    # In celltype_aggregate mode, bias model scaling is not needed because:
+    # Check if celltype_aggregate or multitask_celltype mode is enabled
+    # In these modes, bias model scaling is not needed because:
     # 1. Non-peak regions use the same aggregated_all.bw as bias model training
-    # 2. Peak regions use dynamic scaling during training
-    use_celltype_aggregate = hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate'
+    # 2. Peak regions use dynamic scaling during training (via scaling_factor input)
+    use_dynamic_scaling = hasattr(args, 'data_generator_type') and args.data_generator_type in ('celltype_aggregate', 'multitask_celltype')
     
-    if use_celltype_aggregate:
-        print("celltype_aggregate mode detected: Skipping bias model scaling (using original bias model)")
+    if use_dynamic_scaling:
+        print(f"{args.data_generator_type} mode detected: Skipping bias model scaling (using original bias model with dynamic scaling)")
         bias_model_path_to_use = args.bias_model_path
     else:
         # adjust bias model for training  - using train and validation set
