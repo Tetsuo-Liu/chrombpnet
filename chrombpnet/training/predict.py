@@ -132,6 +132,13 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
         is_multitask_model = len(model.outputs) > 2
         is_multitask_targets = isinstance(y, dict)
         
+        # If targets are dictionary format, treat as multitask regardless of model output count
+        # This handles cases where the generator returns dictionary targets for multitask learning
+        if is_multitask_targets:
+            is_multitask = True
+        else:
+            is_multitask = is_multitask_model
+        
         # Handle 2-input model case
         if is_2input_model:
             if is_2input_data:
@@ -150,7 +157,7 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             preds = model.predict_on_batch(X)
 
         # Handle multitask model predictions
-        if is_multitask_model and is_multitask_targets:
+        if is_multitask:
             # Get celltype indices for this batch
             batch_celltype_indices = None
             if hasattr(data_generator, 'get_celltype_indices'):
@@ -184,51 +191,102 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             # For each sample, find the correct celltype and extract corresponding predictions
             batch_size = len(list(y.values())[0])
             
-            # Extract predictions for each sample based on its celltype
-            batch_true_counts = []
-            batch_profile_preds = []
-            batch_true_counts_sum = []
-            batch_counts_preds = []
+            # Check if this is a multitask model (multiple outputs) or single-output model (bias model)
+            is_actual_multitask_model = len(celltype_names) > 0
             
-            for i in range(batch_size):
-                # Find the correct celltype for this sample
-                sample_celltype_name = None
-                if batch_celltype_indices is not None and index_to_celltype is not None:
-                    celltype_idx = batch_celltype_indices[i]
-                    if celltype_idx >= 0 and celltype_idx in index_to_celltype:
-                        sample_celltype_name = index_to_celltype[celltype_idx]
+            if is_actual_multitask_model:
+                # Multitask model: extract predictions for each celltype-specific head
+                batch_true_counts = []
+                batch_profile_preds = []
+                batch_true_counts_sum = []
+                batch_counts_preds = []
                 
-                # If celltype not found, try to find non-zero target
-                if sample_celltype_name is None:
-                    for celltype_name in celltype_names:
-                        profile_key = f'logits_profile_{celltype_name}'
-                        if profile_key in y and np.any(y[profile_key][i] != 0):
-                            sample_celltype_name = celltype_name
+                for i in range(batch_size):
+                    # Find the correct celltype for this sample
+                    sample_celltype_name = None
+                    if batch_celltype_indices is not None and index_to_celltype is not None:
+                        celltype_idx = batch_celltype_indices[i]
+                        if celltype_idx >= 0 and celltype_idx in index_to_celltype:
+                            sample_celltype_name = index_to_celltype[celltype_idx]
+                    
+                    # If celltype not found, try to find non-zero target
+                    if sample_celltype_name is None:
+                        for celltype_name in celltype_names:
+                            profile_key = f'logits_profile_{celltype_name}'
+                            if profile_key in y and np.any(y[profile_key][i] != 0):
+                                sample_celltype_name = celltype_name
+                                break
+                    
+                    # Default to first celltype if still not found
+                    if sample_celltype_name is None:
+                        sample_celltype_name = celltype_names[0]
+                    
+                    # Extract true labels for this celltype
+                    profile_key = f'logits_profile_{sample_celltype_name}'
+                    count_key = f'logcount_{sample_celltype_name}'
+                    
+                    batch_true_counts.append(y[profile_key][i])
+                    batch_true_counts_sum.append(y[count_key][i, 0])
+                    
+                    # Extract predictions for this celltype
+                    profile_idx = celltype_to_profile_idx[sample_celltype_name]
+                    count_idx = celltype_to_count_idx[sample_celltype_name]
+                    
+                    batch_profile_preds.append(preds[profile_idx][i])
+                    batch_counts_preds.append(preds[count_idx][i, 0])
+                
+                # Convert to arrays and extend lists
+                true_counts.extend(batch_true_counts)
+                profile_probs_predictions.extend(softmax(np.array(batch_profile_preds)))
+                true_counts_sum.extend(batch_true_counts_sum)
+                counts_sum_predictions.extend(batch_counts_preds)
+            else:
+                # Single-output model (bias model) with dictionary-formatted targets
+                # Extract targets by averaging across all celltypes or using first non-zero target
+                batch_true_counts = []
+                batch_profile_preds = []
+                batch_true_counts_sum = []
+                batch_counts_preds = []
+                
+                # Get all profile and count keys from dictionary
+                profile_keys = [k for k in y.keys() if k.startswith('logits_profile_')]
+                count_keys = [k for k in y.keys() if k.startswith('logcount_')]
+                
+                for i in range(batch_size):
+                    # For bias model, use first non-zero target or average across celltypes
+                    # Since bias model learns average bias across all celltypes, we can use any non-zero target
+                    sample_profile = None
+                    sample_count = None
+                    
+                    # Try to find first non-zero target
+                    for profile_key in profile_keys:
+                        if np.any(y[profile_key][i] != 0):
+                            sample_profile = y[profile_key][i]
                             break
+                    
+                    for count_key in count_keys:
+                        if y[count_key][i, 0] != 0:
+                            sample_count = y[count_key][i, 0]
+                            break
+                    
+                    # If no non-zero target found, use first available target (may be zeros)
+                    if sample_profile is None and profile_keys:
+                        sample_profile = y[profile_keys[0]][i]
+                    if sample_count is None and count_keys:
+                        sample_count = y[count_keys[0]][i, 0]
+                    
+                    batch_true_counts.append(sample_profile)
+                    batch_true_counts_sum.append(sample_count)
+                    
+                    # For single-output model, predictions are in preds[0] (profile) and preds[1] (count)
+                    batch_profile_preds.append(preds[0][i])
+                    batch_counts_preds.append(preds[1][i, 0])
                 
-                # Default to first celltype if still not found
-                if sample_celltype_name is None:
-                    sample_celltype_name = celltype_names[0]
-                
-                # Extract true labels for this celltype
-                profile_key = f'logits_profile_{sample_celltype_name}'
-                count_key = f'logcount_{sample_celltype_name}'
-                
-                batch_true_counts.append(y[profile_key][i])
-                batch_true_counts_sum.append(y[count_key][i, 0])
-                
-                # Extract predictions for this celltype
-                profile_idx = celltype_to_profile_idx[sample_celltype_name]
-                count_idx = celltype_to_count_idx[sample_celltype_name]
-                
-                batch_profile_preds.append(preds[profile_idx][i])
-                batch_counts_preds.append(preds[count_idx][i, 0])
-            
-            # Convert to arrays and extend lists
-            true_counts.extend(batch_true_counts)
-            profile_probs_predictions.extend(softmax(np.array(batch_profile_preds)))
-            true_counts_sum.extend(batch_true_counts_sum)
-            counts_sum_predictions.extend(batch_counts_preds)
+                # Convert to arrays and extend lists
+                true_counts.extend(batch_true_counts)
+                profile_probs_predictions.extend(softmax(np.array(batch_profile_preds)))
+                true_counts_sum.extend(batch_true_counts_sum)
+                counts_sum_predictions.extend(batch_counts_preds)
         else:
             # Standard single-task model
             # get counts predictions
