@@ -102,6 +102,22 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
     # Check if dynamic scaling is enabled (for celltype_aggregate generator)
     # This is determined by checking if data_generator_type is 'celltype_aggregate'
     use_dynamic_scaling = hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate'
+    
+    # Check if multitask learning is enabled (for multitask_celltype generator)
+    use_multitask = hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype'
+    
+    # For multitask learning, celltype list is required
+    if use_multitask:
+        assert('celltypes' in model_params.keys()), "celltypes list not specified for multitask model"
+        celltype_list = model_params['celltypes']
+        if isinstance(celltype_list, str):
+            # If it's a string, try to parse it (e.g., comma-separated or JSON)
+            import json
+            try:
+                celltype_list = json.loads(celltype_list)
+            except:
+                celltype_list = [ct.strip() for ct in celltype_list.split(',')]
+        assert(isinstance(celltype_list, list) and len(celltype_list) > 0), "celltypes must be a non-empty list"
 
     bias_model = load_pretrained_bias(bias_model_path)
     bpnet_model_wo_bias = bpnet_model(filters, n_dil_layers, sequence_len, out_pred_len)
@@ -115,7 +131,83 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
     # Define inputs: sequence is always required, scaling_factor is optional
     inp_seq = Input(shape=(sequence_len, 4), name='sequence')
     
-    if use_dynamic_scaling:
+    if use_multitask:
+        # Multitask learning: shared encoder with cell-type-specific decoder heads
+        # Requires dynamic scaling (2-input model)
+        inp_scale = Input(shape=(1,), name='scaling_factor')
+        
+        # Get shared encoder output (once)
+        output_wo_bias = bpnet_model_wo_bias(inp_seq)
+        
+        # Get bias output and apply dynamic scaling
+        bias_output = bias_model(inp_seq)
+        scaled_bias_profile = Multiply(name="scaled_bias_profile_logits")([bias_output[0], inp_scale])
+        scaled_bias_logcounts = Lambda(
+            lambda x: x[0] + tf.math.log(x[1] + 1e-6),
+            name="scaled_bias_logcounts"
+        )([bias_output[1], inp_scale])
+        
+        # Create decoder heads for each cell type
+        profile_outputs = []
+        count_outputs = []
+        
+        # Access shared encoder's intermediate layers for decoder heads
+        # Get the layer before profile/count predictions (the dilated conv output)
+        # This is the input to the GAP layer (for counts) and the profile Conv1D layer
+        shared_encoder_intermediate = bpnet_model_wo_bias.get_layer('gap').input
+        
+        # Create profile and count decoder heads for each cell type
+        for cell_type in celltype_list:
+            # Profile decoder head: Conv1D -> Crop -> Flatten -> Add bias
+            # Use the same structure as bpnet_model but with cell-type-specific names
+            prof_out_precrop = Conv1D(filters=1,
+                                    kernel_size=75,
+                                    padding='valid',
+                                    name=f'prof_out_precrop_{cell_type}')(shared_encoder_intermediate)
+            
+            # Crop to match output length
+            prof_out_precrop_shape = int_shape(prof_out_precrop)
+            cropsize = int(prof_out_precrop_shape[1]/2) - int(out_pred_len/2)
+            assert cropsize >= 0
+            assert (prof_out_precrop_shape[1] % 2 == 0)  # Necessary for symmetric cropping
+            
+            prof_cropped = Cropping1D(cropsize,
+                                    name=f'prof_crop_{cell_type}')(prof_out_precrop)
+            prof_flattened = Flatten(name=f'prof_flatten_{cell_type}')(prof_cropped)
+            
+            # Add scaled bias (each sample has its own scaling_factor, so this works correctly)
+            final_prof = Add(name=f'logits_profile_{cell_type}')([prof_flattened, scaled_bias_profile])
+            profile_outputs.append(final_prof)
+            
+            # Count decoder head: Dense -> Add bias
+            # Use GAP output from shared encoder
+            gap_output = bpnet_model_wo_bias.get_layer('gap').output
+            count_head = Dense(1, name=f'logcount_pred_{cell_type}')(gap_output)
+            concat_counts = Concatenate(axis=-1)([count_head, scaled_bias_logcounts])
+            final_count = Lambda(lambda x: tf.math.reduce_logsumexp(x, axis=-1, keepdims=True),
+                                name=f'logcount_{cell_type}')(concat_counts)
+            count_outputs.append(final_count)
+        
+        # Create model with all outputs
+        all_outputs = profile_outputs + count_outputs
+        model = Model(inputs=[inp_seq, inp_scale], outputs=all_outputs)
+        
+        # Define loss functions and loss weights as dictionaries
+        loss_dict = {}
+        loss_weights_dict = {}
+        for cell_type in celltype_list:
+            loss_dict[f'logits_profile_{cell_type}'] = multinomial_nll
+            loss_dict[f'logcount_{cell_type}'] = 'mse'
+            loss_weights_dict[f'logits_profile_{cell_type}'] = 1.0
+            loss_weights_dict[f'logcount_{cell_type}'] = counts_loss_weight
+        
+        model.compile(optimizer=Adam(learning_rate=args.learning_rate),
+                     loss=loss_dict,
+                     loss_weights=loss_weights_dict)
+        
+        return model
+    
+    elif use_dynamic_scaling:
         # For celltype_aggregate generator: 2-input model with dynamic bias scaling
         inp_scale = Input(shape=(1,), name='scaling_factor')
         

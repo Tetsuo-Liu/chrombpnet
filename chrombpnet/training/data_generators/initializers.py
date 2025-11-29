@@ -80,8 +80,46 @@ def initialize_generators(args, mode, parameters, return_coords):
     nonpeak_regions, negative_sampling_ratio, \
     max_jitter, add_revcomp, shuffle_at_epoch_start  =  fetch_data_and_model_params_based_on_mode(mode, args, parameters, nonpeak_regions, peak_regions)
     
+    # Check if multitask_celltype generator is requested
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype':
+        # Validate required arguments for CelltypeGenerator (multitask mode)
+        if not hasattr(args, 'celltype_metadata') or args.celltype_metadata is None:
+            raise ValueError("--celltype-metadata is required when using multitask_celltype generator")
+        if not hasattr(args, 'aggregated_bigwig') or args.aggregated_bigwig is None:
+            raise ValueError("--aggregated-bigwig is required when using multitask_celltype generator")
+        
+        from chrombpnet.training.data_generators.celltype_generator import CelltypeGenerator
+        
+        # CRITICAL: For test mode, override scaling factors to 1.0 (standard scale)
+        # This ensures prediction/interpretation uses the model's standard state,
+        # independent of cell-type-specific scales, as per the plan (Section 5)
+        override_scaling_factor = 1.0 if mode == "test" else None
+        
+        if override_scaling_factor is not None:
+            print(f"Test mode: Using standard scaling factor ({override_scaling_factor}) for prediction/interpretation")
+        
+        print(f"Initializing CelltypeGenerator (multitask mode) with mode: {mode}")
+        generator = CelltypeGenerator(
+            peak_regions=peak_regions,
+            nonpeak_regions=nonpeak_regions,
+            celltype_metadata_path=args.celltype_metadata,
+            aggregated_bigwig_path=args.aggregated_bigwig,
+            genome_fasta=args.genome,
+            batch_size=args.batch_size,
+            inputlen=inputlen,
+            outputlen=outputlen,
+            max_jitter=max_jitter,
+            negative_sampling_ratio=negative_sampling_ratio,
+            add_revcomp=add_revcomp,
+            return_coords=return_coords,
+            shuffle_at_epoch_start=shuffle_at_epoch_start,
+            mode=mode,
+            seed=args.seed if hasattr(args, 'seed') else None,
+            override_scaling_factor=override_scaling_factor,
+            multitask_mode=True  # Enable multitask learning mode
+        )
     # Check if celltype_aggregate generator is requested
-    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate':
+    elif hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate':
         # Validate required arguments for CelltypeGenerator
         if not hasattr(args, 'celltype_metadata') or args.celltype_metadata is None:
             raise ValueError("--celltype-metadata is required when using celltype_aggregate generator")
@@ -115,7 +153,8 @@ def initialize_generators(args, mode, parameters, return_coords):
             shuffle_at_epoch_start=shuffle_at_epoch_start,
             mode=mode,
             seed=args.seed if hasattr(args, 'seed') else None,
-            override_scaling_factor=override_scaling_factor
+            override_scaling_factor=override_scaling_factor,
+            multitask_mode=False  # Single-task learning mode
         )
     # Check if weighted_dynamic generator is requested
     elif hasattr(args, 'data_generator_type') and args.data_generator_type == 'weighted_dynamic':

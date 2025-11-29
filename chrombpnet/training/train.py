@@ -205,6 +205,22 @@ def get_model_param_dict(args):
 
     assert(int(params["inputlen"])%2==0)
     assert(int(params["outputlen"])%2==0)
+    
+    # For multitask_celltype generator, load celltype list from metadata
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype':
+        if not hasattr(args, 'celltype_metadata') or args.celltype_metadata is None:
+            raise ValueError("--celltype-metadata is required when using multitask_celltype generator")
+        
+        import pandas as pd
+        celltype_metadata_df = pd.read_csv(args.celltype_metadata, sep='\t')
+        
+        # Extract cell type list
+        if 'cell_type' not in celltype_metadata_df.columns:
+            raise ValueError("celltype_metadata file must contain 'cell_type' column")
+        
+        celltype_list = celltype_metadata_df['cell_type'].tolist()
+        params['celltypes'] = celltype_list
+        print(f"Loaded {len(celltype_list)} cell types for multitask learning: {celltype_list}")
 
     return params 
 

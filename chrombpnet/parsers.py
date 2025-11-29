@@ -125,10 +125,10 @@ def read_parser():
         optional_main_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
 
         # DP model specific arguments
-        optional_main_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate'], default='standard', help='Data generator type for training')
+        optional_main_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate', 'multitask_celltype'], default='standard', help='Data generator type for training')
         optional_main_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
-        optional_main_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate)')
-        optional_main_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic and celltype_aggregate)')
+        optional_main_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate and multitask_celltype)')
+        optional_main_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic, celltype_aggregate, and multitask_celltype)')
  
          # chrombpnet pipeline arguments
 		
@@ -147,10 +147,10 @@ def read_parser():
         optional_pipeline_parser.add_argument("-bs", "--batch-size", type=int, default=64, help="batch size to use for model training")
 
         # DP model specific arguments
-        optional_pipeline_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate'], default='standard', help='Data generator type for training')
+        optional_pipeline_parser.add_argument("--data-generator-type", choices=['standard', 'weighted_dynamic', 'celltype_aggregate', 'multitask_celltype'], default='standard', help='Data generator type for training')
         optional_pipeline_parser.add_argument("--pseudobulk-metadata", type=str, required=False, help='Path to pseudobulk metadata TSV file (required for weighted_dynamic)')
-        optional_pipeline_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate)')
-        optional_pipeline_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic and celltype_aggregate)')
+        optional_pipeline_parser.add_argument("--celltype-metadata", type=str, required=False, help='Path to celltype_metadata_scaled.tsv file (required for celltype_aggregate and multitask_celltype)')
+        optional_pipeline_parser.add_argument("--aggregated-bigwig", type=str, required=False, help='Path to aggregated BigWig for non-peak regions (required for weighted_dynamic, celltype_aggregate, and multitask_celltype)')
  
         # chrombpnet model qc arguments
 
@@ -341,4 +341,36 @@ def validate_argument_dependencies(args):
             raise ValueError(
                 f"When using --data-generator-type weighted_dynamic, the following arguments are required: "
                 f"{', '.join(missing_args)}. Please provide these arguments to use the weighted dynamic pairing generator."
+            )
+    
+    # Check celltype_aggregate generator dependencies
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate':
+        missing_args = []
+        
+        if not hasattr(args, 'celltype_metadata') or args.celltype_metadata is None:
+            missing_args.append('--celltype-metadata')
+        
+        if not hasattr(args, 'aggregated_bigwig') or args.aggregated_bigwig is None:
+            missing_args.append('--aggregated-bigwig')
+        
+        if missing_args:
+            raise ValueError(
+                f"When using --data-generator-type celltype_aggregate, the following arguments are required: "
+                f"{', '.join(missing_args)}. Please provide these arguments to use the celltype aggregation generator."
+            )
+    
+    # Check multitask_celltype generator dependencies
+    if hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype':
+        missing_args = []
+        
+        if not hasattr(args, 'celltype_metadata') or args.celltype_metadata is None:
+            missing_args.append('--celltype-metadata')
+        
+        if not hasattr(args, 'aggregated_bigwig') or args.aggregated_bigwig is None:
+            missing_args.append('--aggregated-bigwig')
+        
+        if missing_args:
+            raise ValueError(
+                f"When using --data-generator-type multitask_celltype, the following arguments are required: "
+                f"{', '.join(missing_args)}. Please provide these arguments to use the multitask celltype generator."
             )

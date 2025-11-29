@@ -197,7 +197,8 @@ class CelltypeGenerator(keras.utils.Sequence):
                  shuffle_at_epoch_start: bool,
                  mode: str = "train",
                  seed: Optional[int] = None,
-                 override_scaling_factor: Optional[float] = None):
+                 override_scaling_factor: Optional[float] = None,
+                 multitask_mode: bool = False):
         """
         Initialize the Celltype Generator.
         
@@ -220,6 +221,8 @@ class CelltypeGenerator(keras.utils.Sequence):
             override_scaling_factor: If provided, override all scaling factors with this value.
                                     Useful for prediction/interpretation to use standard scale (1.0).
                                     If None, uses cell-type-specific scaling factors from metadata.
+            multitask_mode: If True, returns dictionary-formatted targets for multitask learning.
+                           If False, returns tuple-formatted targets for single-task learning (backward compatibility).
         """
         
         # Store basic parameters
@@ -231,6 +234,7 @@ class CelltypeGenerator(keras.utils.Sequence):
         self.outputlen = outputlen
         self.negative_sampling_ratio = negative_sampling_ratio
         self.return_coords = return_coords
+        self.multitask_mode = multitask_mode
         
         # Mode-specific augmentation
         self.mode = mode
@@ -409,6 +413,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.peak_coords = None
             self.peak_scaling_factors = None
             self.peak_loss_weights = None
+            self.peak_celltype_indices = None
             return
             
         epoch_start_time = time.time()
@@ -504,6 +509,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.peak_coords = None
             self.peak_scaling_factors = None
             self.peak_loss_weights = None
+            self.peak_celltype_indices = None
             return
         
         # Group pairs by cell type (bigWig file) for efficient I/O
@@ -608,6 +614,7 @@ class CelltypeGenerator(keras.utils.Sequence):
         all_coords = []
         all_scaling_factors = []
         all_loss_weights = []
+        all_celltype_indices = []
         
         genome = pyfaidx.Fasta(self.genome_fasta)
         
@@ -642,12 +649,13 @@ class CelltypeGenerator(keras.utils.Sequence):
                 finally:
                     cts_bw.close()
                 
-                # Store data with corresponding scaling factors and loss weights
+                # Store data with corresponding scaling factors, loss weights, and celltype indices
                 all_seqs.extend(group_seqs)
                 all_cts.extend(group_cts)
                 all_coords.extend(group_coords)
                 all_scaling_factors.extend([scaling_factor] * len(group_seqs))
                 all_loss_weights.extend([loss_weight] * len(group_seqs))
+                all_celltype_indices.extend([celltype_idx] * len(group_seqs))
         
         finally:
             genome.close()
@@ -659,12 +667,14 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.peak_coords = np.array(all_coords)
             self.peak_scaling_factors = np.array(all_scaling_factors, dtype=np.float32)
             self.peak_loss_weights = np.array(all_loss_weights, dtype=np.float32)
+            self.peak_celltype_indices = np.array(all_celltype_indices, dtype=np.int32)
         else:
             self.peak_seqs = None
             self.peak_cts = None
             self.peak_coords = None
             self.peak_scaling_factors = None
             self.peak_loss_weights = None
+            self.peak_celltype_indices = None
     
     def _reorganize_parallel_results(self, all_results: List[Dict], pairs: List):
         """
@@ -711,6 +721,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             ordered_coords = []
             ordered_scaling_factors = []
             ordered_loss_weights = []
+            ordered_celltype_indices = []
             
             for pair_idx in range(len(pairs)):
                 if pair_idx in peak_data_map:
@@ -720,18 +731,23 @@ class CelltypeGenerator(keras.utils.Sequence):
                     ordered_coords.append(coord)
                     ordered_scaling_factors.append(scaling_factor)
                     ordered_loss_weights.append(loss_weight)
+                    # Extract celltype_idx from pairs
+                    _, celltype_idx = pairs[pair_idx]
+                    ordered_celltype_indices.append(celltype_idx)
             
             self.peak_seqs = np.array(ordered_seqs)
             self.peak_cts = np.array(ordered_cts)
             self.peak_coords = np.array(ordered_coords)
             self.peak_scaling_factors = np.array(ordered_scaling_factors, dtype=np.float32)
             self.peak_loss_weights = np.array(ordered_loss_weights, dtype=np.float32)
+            self.peak_celltype_indices = np.array(ordered_celltype_indices, dtype=np.int32)
         else:
             self.peak_seqs = None
             self.peak_cts = None
             self.peak_coords = None
             self.peak_scaling_factors = None
             self.peak_loss_weights = None
+            self.peak_celltype_indices = None
     
     def _crop_revcomp_data(self):
         """
@@ -750,10 +766,11 @@ class CelltypeGenerator(keras.utils.Sequence):
                 self.peak_coords, rng=epoch_rng_crop
             )
             
-            # Maintain scaling factors and loss weights through cropping
+            # Maintain scaling factors, loss weights, and celltype indices through cropping
             # (cropping doesn't change the number of samples, just their content)
             cropped_scaling_factors = self.peak_scaling_factors.copy()
             cropped_loss_weights = self.peak_loss_weights.copy()
+            cropped_celltype_indices = self.peak_celltype_indices.copy()
             
             # Handle negative sampling ratio
             if self.negative_sampling_ratio < 1.0:
@@ -767,6 +784,10 @@ class CelltypeGenerator(keras.utils.Sequence):
                 sampled_nonpeak_loss_weights = self.nonpeak_loss_weights[
                     :len(sampled_nonpeak_seqs)
                 ]
+                # Non-peak regions don't have a specific celltype, use -1 as marker
+                sampled_nonpeak_celltype_indices = np.full(
+                    len(sampled_nonpeak_seqs), -1, dtype=np.int32
+                )
                 
                 self.seqs = np.vstack([cropped_peaks, sampled_nonpeak_seqs])
                 self.cts = np.vstack([cropped_cnts, sampled_nonpeak_cts]) 
@@ -777,7 +798,15 @@ class CelltypeGenerator(keras.utils.Sequence):
                 self.loss_weights = np.concatenate([
                     cropped_loss_weights, sampled_nonpeak_loss_weights
                 ])
+                self.celltype_indices = np.concatenate([
+                    cropped_celltype_indices, sampled_nonpeak_celltype_indices
+                ])
             else:
+                # Non-peak regions don't have a specific celltype, use -1 as marker
+                nonpeak_celltype_indices = np.full(
+                    len(self.nonpeak_seqs), -1, dtype=np.int32
+                )
+                
                 self.seqs = np.vstack([cropped_peaks, self.nonpeak_seqs])
                 self.cts = np.vstack([cropped_cnts, self.nonpeak_cts])
                 self.coords = np.vstack([cropped_coords, self.nonpeak_coords])
@@ -786,6 +815,9 @@ class CelltypeGenerator(keras.utils.Sequence):
                 ])
                 self.loss_weights = np.concatenate([
                     cropped_loss_weights, self.nonpeak_loss_weights
+                ])
+                self.celltype_indices = np.concatenate([
+                    cropped_celltype_indices, nonpeak_celltype_indices
                 ])
                 
         elif self.peak_seqs is not None:
@@ -803,6 +835,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.coords = cropped_coords
             self.scaling_factors = self.peak_scaling_factors.copy()
             self.loss_weights = self.peak_loss_weights.copy()
+            self.celltype_indices = self.peak_celltype_indices.copy()
             
         elif self.nonpeak_seqs is not None:
             # Only non-peak data
@@ -811,6 +844,10 @@ class CelltypeGenerator(keras.utils.Sequence):
             self.coords = self.nonpeak_coords
             self.scaling_factors = self.nonpeak_scaling_factors.copy()
             self.loss_weights = self.nonpeak_loss_weights.copy()
+            # Non-peak regions don't have a specific celltype, use -1 as marker
+            self.celltype_indices = np.full(
+                len(self.nonpeak_seqs), -1, dtype=np.int32
+            )
         else:
             raise ValueError("Both peak and non-peak arrays are empty")
             
@@ -830,6 +867,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             shuffled_coords = self.coords[shuffle_indices]
             shuffled_scaling_factors = self.scaling_factors[shuffle_indices]
             shuffled_loss_weights = self.loss_weights[shuffle_indices]
+            shuffled_celltype_indices = self.celltype_indices[shuffle_indices]
             
             # Apply reverse complement augmentation (without shuffle, as we already shuffled)
             # Use epoch-specific RandomState for reproducibility
@@ -840,9 +878,10 @@ class CelltypeGenerator(keras.utils.Sequence):
                 self.add_revcomp, shuffle=False, rng=epoch_rng_augment  # Use RandomState for reproducibility
             )
             
-            # Scaling factors and loss weights are already shuffled and aligned
+            # Scaling factors, loss weights, and celltype indices are already shuffled and aligned
             self.cur_scaling_factors = shuffled_scaling_factors
             self.cur_loss_weights = shuffled_loss_weights
+            self.cur_celltype_indices = shuffled_celltype_indices
         else:
             # No shuffling, just apply reverse complement augmentation
             # Use epoch-specific RandomState for reproducibility
@@ -854,6 +893,7 @@ class CelltypeGenerator(keras.utils.Sequence):
             )
             self.cur_scaling_factors = self.scaling_factors.copy()
             self.cur_loss_weights = self.loss_weights.copy()
+            self.cur_celltype_indices = self.celltype_indices.copy()
         
     def _subsample_nonpeak_data(self, nonpeak_seqs, nonpeak_cts, nonpeak_coords, 
                                peak_data_size, negative_sampling_ratio):
@@ -887,8 +927,15 @@ class CelltypeGenerator(keras.utils.Sequence):
         """
         Get batch data with scaling factors and loss weights.
         
+        For multitask learning, returns dictionary-formatted targets where each cell type
+        has its own output head. Only the correct cell type head gets real labels,
+        others get dummy zero arrays.
+        
         Returns:
-            3-element tuple: ((batch_seq, batch_scaling_factors), (batch_cts, batch_log_cts), batch_loss_weights)
+            3-element tuple: ((batch_seq, batch_scaling_factors), targets_dict, batch_loss_weights)
+            - inputs: (batch_seq, batch_scaling_factors) tuple
+            - targets_dict: Dictionary with keys like 'logits_profile_{cell_type}' and 'logcount_{cell_type}'
+            - batch_loss_weights: Sample weights for loss calculation
             Coordinates are available via get_coords(idx) if return_coords=True
         """
         start_idx = idx * self.batch_size
@@ -898,6 +945,7 @@ class CelltypeGenerator(keras.utils.Sequence):
         batch_cts = self.cur_cts[start_idx:end_idx]
         batch_scaling_factors = self.cur_scaling_factors[start_idx:end_idx]
         batch_loss_weights = self.cur_loss_weights[start_idx:end_idx]
+        batch_celltype_indices = self.cur_celltype_indices[start_idx:end_idx]
         
         # Calculate log counts
         batch_log_cts = np.log(1 + batch_cts.sum(-1, keepdims=True))
@@ -911,12 +959,45 @@ class CelltypeGenerator(keras.utils.Sequence):
                 self.coords_cache = {}
             self.coords_cache[idx] = self.cur_coords[start_idx:end_idx]
         
-        # Always return 3-element tuple for Keras compatibility
-        return (
-            (batch_seq, batch_scaling_factors),
-            (batch_cts, batch_log_cts),
-            batch_loss_weights
-        )
+        # Return format depends on multitask_mode
+        if self.multitask_mode:
+            # Build dictionary-formatted targets for multitask learning
+            # Initialize with dummy zero arrays for all cell types
+            targets_dict = {}
+            batch_size = len(batch_seq)
+            
+            # Create dummy arrays with correct shapes
+            dummy_profile_labels = np.zeros_like(batch_cts)
+            dummy_counts_labels = np.zeros_like(batch_log_cts)
+            
+            # Initialize all cell type heads with dummy labels
+            for celltype_idx, celltype_row in self.celltype_metadata.iterrows():
+                cell_type_name = celltype_row['cell_type']
+                targets_dict[f'logits_profile_{cell_type_name}'] = dummy_profile_labels.copy()
+                targets_dict[f'logcount_{cell_type_name}'] = dummy_counts_labels.copy()
+            
+            # Set real labels only for the correct cell type head for each sample
+            for i in range(batch_size):
+                celltype_idx = batch_celltype_indices[i]
+                # Skip non-peak regions (celltype_idx == -1) - they keep dummy labels
+                if celltype_idx >= 0:
+                    cell_type_name = self.index_to_celltype[celltype_idx]
+                    targets_dict[f'logits_profile_{cell_type_name}'][i] = batch_cts[i]
+                    targets_dict[f'logcount_{cell_type_name}'][i] = batch_log_cts[i]
+            
+            # Return 3-element tuple: (inputs, targets_dict, sample_weights)
+            return (
+                (batch_seq, batch_scaling_factors),
+                targets_dict,
+                batch_loss_weights
+            )
+        else:
+            # Return tuple-formatted targets for backward compatibility (single-task learning)
+            return (
+                (batch_seq, batch_scaling_factors),
+                (batch_cts, batch_log_cts),
+                batch_loss_weights
+            )
     
     def get_coords(self, idx):
         """
