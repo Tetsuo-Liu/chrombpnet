@@ -192,7 +192,8 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             batch_size = len(list(y.values())[0])
             
             # Check if this is a multitask model (multiple outputs) or single-output model (bias model)
-            is_actual_multitask_model = len(celltype_names) > 0
+            # A multitask model should have celltype-specific output names starting with 'logits_profile_' or 'logcount_'
+            is_actual_multitask_model = len(celltype_names) > 0 and len(celltype_to_profile_idx) > 0
             
             if is_actual_multitask_model:
                 # Multitask model: extract predictions for each celltype-specific head
@@ -219,11 +220,64 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                     
                     # Default to first celltype if still not found
                     if sample_celltype_name is None:
-                        sample_celltype_name = celltype_names[0]
+                        if celltype_names:
+                            sample_celltype_name = celltype_names[0]
+                        else:
+                            # Fallback: use first available celltype from target dictionary
+                            for key in y.keys():
+                                if key.startswith('logits_profile_'):
+                                    sample_celltype_name = key.replace('logits_profile_', '')
+                                    break
+                            if sample_celltype_name is None:
+                                raise ValueError(
+                                    f"No celltype found in targets and model has no celltype outputs. "
+                                    f"Model outputs: {[out.name for out in model.outputs]}"
+                                )
+                    
+                    # Verify that the celltype exists in model outputs
+                    # If not, try to find a matching celltype from available outputs
+                    if sample_celltype_name not in celltype_to_profile_idx:
+                        # Try to find a matching celltype (case-insensitive or partial match)
+                        found_match = False
+                        for available_celltype in celltype_names:
+                            if available_celltype.lower() == sample_celltype_name.lower():
+                                sample_celltype_name = available_celltype
+                                found_match = True
+                                break
+                        
+                        # If still no match, use first available celltype
+                        if not found_match and celltype_names:
+                            sample_celltype_name = celltype_names[0]
+                        elif not celltype_names:
+                            # This should not happen if is_actual_multitask_model is True
+                            # but handle gracefully
+                            raise ValueError(
+                                f"Celltype '{sample_celltype_name}' not found in model outputs, "
+                                f"and no celltype names were extracted from model. "
+                                f"Model outputs: {[out.name for out in model.outputs]}"
+                            )
                     
                     # Extract true labels for this celltype
                     profile_key = f'logits_profile_{sample_celltype_name}'
                     count_key = f'logcount_{sample_celltype_name}'
+                    
+                    # Verify keys exist in target dictionary
+                    if profile_key not in y:
+                        # Try to find any non-zero target as fallback
+                        for key in y.keys():
+                            if key.startswith('logits_profile_') and np.any(y[key][i] != 0):
+                                profile_key = key
+                                sample_celltype_name = key.replace('logits_profile_', '')
+                                break
+                    
+                    if count_key not in y:
+                        count_key = f'logcount_{sample_celltype_name}'
+                        if count_key not in y:
+                            # Try to find matching count key
+                            for key in y.keys():
+                                if key.startswith('logcount_') and y[key][i, 0] != 0:
+                                    count_key = key
+                                    break
                     
                     batch_true_counts.append(y[profile_key][i])
                     batch_true_counts_sum.append(y[count_key][i, 0])
