@@ -23,11 +23,26 @@ from chrombpnet.training.utils.bed_utils import read_bed_with_summit
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
 PWM_SCHEMA = ["MOTIF_NAME", "MOTIF_PWM_FWD"]
 
-def load_model_wrapper(args):
+def load_model_wrapper(args_or_path):
+    """
+    Load model with backward compatibility.
+    
+    Args:
+        args_or_path: Either args object with .model_h5 attribute, or direct path string
+        
+    Returns:
+        Loaded Keras model
+    """
+    # Handle both args object and direct path string
+    if isinstance(args_or_path, str):
+        model_path = args_or_path
+    else:
+        model_path = args_or_path.model_h5
+    
     # read .h5 model
     custom_objects={"multinomial_nll":losses.multinomial_nll, "tf": tf}    
     get_custom_objects().update(custom_objects)    
-    model=load_model(args.model_h5, compile=False)
+    model=load_model(model_path, compile=False)
     print("got the model")
     model.summary()
     return model
@@ -90,6 +105,87 @@ def get_footprint_for_motif(seqs, motif, model, inputlen, batch_size, scaling_fa
 
     return footprint_for_motif.mean(0), counts_for_motif.mean(0)
 
+def run_footprinting(model, background_seqs, motifs_df, inputlen, outputlen, batch_size, scaling_factor=1.0, output_prefix=None, ylim=None):
+    """
+    Core footprinting logic extracted for reuse.
+    
+    Args:
+        model: Loaded Keras model
+        background_seqs: Background sequences (one-hot encoded, shape: [num_seqs, inputlen, 4])
+        motifs_df: DataFrame with columns 'MOTIF_NAME' and 'MOTIF_PWM_FWD'
+        inputlen: Model input length
+        outputlen: Model output length
+        batch_size: Batch size for prediction
+        scaling_factor: Scaling factor for 2-input models (default: 1.0)
+        output_prefix: Optional output prefix for saving plots
+        ylim: Optional tuple for y-axis limits
+        
+    Returns:
+        Dictionary with motif names as keys and [footprint, counts] as values
+    """
+    footprints_at_motifs = {}
+    avg_response_at_tn5 = []
+    
+    # Control motif (empty sequence)
+    motif = "control"
+    motif_to_insert_fwd = ""
+    print("inserting motif: ", motif)
+    print(motif_to_insert_fwd)
+    motif_footprint, motif_counts = get_footprint_for_motif(
+        background_seqs, motif_to_insert_fwd, model, inputlen, batch_size, scaling_factor
+    )
+    footprints_at_motifs[motif] = [motif_footprint, motif_counts]
+    
+    if output_prefix is not None:
+        plt.figure()
+        plt.plot(range(200), motif_footprint[outputlen//2-100:outputlen//2+100])
+        if ylim is not None:
+            plt.ylim(ylim)
+        plt.xlabel("200bp around motif insertion", fontsize=11)
+        plt.ylabel("Probability", fontsize=11)
+        plt.xticks(ticks=[0,100,200], labels=[-100,0,100])
+        plt.tight_layout()
+        plt.savefig(f"{output_prefix}.{motif}.footprint.png")
+        plt.close()
+    
+    # Process each motif from the dataframe
+    for index, row in motifs_df.iterrows():
+        motif = row["MOTIF_NAME"]
+        motif_to_insert_fwd = row["MOTIF_PWM_FWD"]
+        print("inserting motif: ", motif)
+        print(motif_to_insert_fwd)
+        motif_footprint, motif_counts = get_footprint_for_motif(
+            background_seqs, motif_to_insert_fwd, model, inputlen, batch_size, scaling_factor
+        )
+        footprints_at_motifs[motif] = [motif_footprint, motif_counts]
+        
+        # Track Tn5/DNase motifs for bias correction validation
+        if ("tn5" in motif.lower()) or ("dnase" in motif.lower()):
+            avg_response_at_tn5.append(np.round(np.max(motif_footprint), 3))
+        
+        if output_prefix is not None:
+            plt.figure()
+            plt.plot(range(200), motif_footprint[outputlen//2-100:outputlen//2+100])
+            if ylim is not None:
+                plt.ylim(ylim)
+            plt.xlabel("200bp around motif insertion", fontsize=11)
+            plt.ylabel("Probability", fontsize=11)
+            plt.xticks(ticks=[0,100,200], labels=[-100,0,100])
+            plt.tight_layout()
+            plt.savefig(f"{output_prefix}.{motif}.footprint.png")
+            plt.close()
+    
+    # Save max bias response if Tn5 motifs were processed
+    if len(avg_response_at_tn5) > 0 and output_prefix is not None:
+        if np.all(np.array(avg_response_at_tn5) < 0.003):
+            with open(f"{output_prefix}_max_bias_response.txt", "w") as ofile:
+                ofile.write("corrected_" + str(round(np.mean(avg_response_at_tn5), 3)) + "_" + "/".join(list(map(str, avg_response_at_tn5))))
+        else:
+            with open(f"{output_prefix}_max_bias_response.txt", "w") as ofile:
+                ofile.write("uncorrected_" + str(round(np.mean(avg_response_at_tn5), 3)) + "_" + "/".join(list(map(str, avg_response_at_tn5))))
+    
+    return footprints_at_motifs
+
 def main(args):
 
 	pwm_df = pd.read_csv(args.motifs_to_pwm, sep='\t',names=PWM_SCHEMA)
@@ -118,59 +214,18 @@ def main(args):
 	regions_subsample = regions_df[(regions_df["chr"].isin(chroms_to_keep))]
 	regions_seqs = get_seq(regions_subsample, genome_fasta, inputlen)
 
-	footprints_at_motifs = {}
-
-	avg_response_at_tn5 = []
-
-	motif = "control"
-	motif_to_insert_fwd = ""
-	print("inserting motif: ", motif)
-	print(motif_to_insert_fwd)
-	motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size, args.scaling_factor)
-	footprints_at_motifs[motif]=[motif_footprint,motif_counts]
-
-	plt.figure()
-	plt.plot(range(200),motif_footprint[outputlen//2-100:outputlen//2+100])
-	if args.ylim is not None: 
-		plt.ylim(args.ylim)
-	plt.xlabel("200bp arount motif insertion", fontsize=11)
-	plt.ylabel("Probability", fontsize=11)
-	plt.xticks(ticks=[0,100,200], labels=[-100,0,100])
-	plt.tight_layout()
-	plt.savefig(args.output_prefix+".{}.footprint.png".format(motif))
-
-
-	#get motif names from column1 of the pwm_df
-	for index, row in pwm_df.iterrows():
-		motif=row["MOTIF_NAME"]
-		motif_to_insert_fwd=row["MOTIF_PWM_FWD"]        
-		print("inserting motif: ", motif)
-		print(motif_to_insert_fwd)
-		motif_footprint, motif_counts = get_footprint_for_motif(regions_seqs, motif_to_insert_fwd, model, inputlen, args.batch_size, args.scaling_factor)
-		footprints_at_motifs[motif]=[motif_footprint,motif_counts]
-
-		# plot footprints of center 200bp
-		if ("tn5" in motif.lower()) or ("dnase" in motif.lower()):
-				avg_response_at_tn5.append(np.round(np.max(motif_footprint),3))
-		plt.figure()
-		plt.plot(range(200),motif_footprint[outputlen//2-100:outputlen//2+100])
-		if args.ylim is not None: 
-			plt.ylim(args.ylim)
-		plt.xlabel("200bp arount motif insertion", fontsize=11)
-		plt.ylabel("Probability", fontsize=11)
-		plt.xticks(ticks=[0,100,200], labels=[-100,0,100])
-		plt.tight_layout()
-		plt.savefig(args.output_prefix+".{}.footprint.png".format(motif))
-
-	if len(avg_response_at_tn5) > 0:
-		if np.all(np.array(avg_response_at_tn5) < 0.003):
-			ofile = open("{}_max_bias_response.txt".format(args.output_prefix), "w")
-			ofile.write("corrected_"+str(round(np.mean(avg_response_at_tn5),3))+"_"+"/".join(list(map(str,avg_response_at_tn5))))
-			ofile.close()
-		else:
-			ofile = open("{}_max_bias_response.txt".format(args.output_prefix), "w")
-			ofile.write("uncorrected_"+str(round(np.mean(avg_response_at_tn5),3))+"_"+"/".join(list(map(str,avg_response_at_tn5))))
-			ofile.close()
+	# Use refactored run_footprinting function
+	footprints_at_motifs = run_footprinting(
+		model=model,
+		background_seqs=regions_seqs,
+		motifs_df=pwm_df,
+		inputlen=inputlen,
+		outputlen=outputlen,
+		batch_size=args.batch_size,
+		scaling_factor=args.scaling_factor,
+		output_prefix=args.output_prefix,
+		ylim=args.ylim
+	)
 
 	print("Saving marginal footprints")
 	dd.io.save("{}_footprints.h5".format(args.output_prefix),

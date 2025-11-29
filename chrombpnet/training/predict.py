@@ -51,11 +51,26 @@ def write_predictions_h5py(output_prefix, profile, logcts, coords):
     h5_file.close()
 
 
-def load_model_wrapper(args):
+def load_model_wrapper(args_or_path):
+    """
+    Load model with backward compatibility.
+    
+    Args:
+        args_or_path: Either args object with .model_h5 attribute, or direct path string
+        
+    Returns:
+        Loaded Keras model
+    """
+    # Handle both args object and direct path string
+    if isinstance(args_or_path, str):
+        model_path = args_or_path
+    else:
+        model_path = args_or_path.model_h5
+    
     # read .h5 model
     custom_objects={"tf": tf, "multinomial_nll":losses.multinomial_nll}    
     get_custom_objects().update(custom_objects)    
-    model=load_model(args.model_h5, compile=False)
+    model=load_model(model_path, compile=False)
     print("got the model")
     #model.summary()
     return model
@@ -64,8 +79,23 @@ def softmax(x, temp=1):
     norm_x = x - np.mean(x,axis=1, keepdims=True)
     return np.exp(temp*norm_x)/np.sum(np.exp(temp*norm_x), axis=1, keepdims=True)
 
-def predict_on_batch_wrapper(model,test_generator):
-    num_batches=len(test_generator)
+def run_predictions(model, data_generator, scaling_factor=1.0):
+    """
+    Core prediction logic extracted for reuse.
+    
+    Args:
+        model: Loaded Keras model
+        data_generator: Data generator object
+        scaling_factor: Scaling factor for 2-input models (default: 1.0)
+        
+    Returns:
+        Tuple of (true_counts, profile_predictions, counts_predictions, coordinates)
+        - true_counts: True profile counts (shape: [num_regions, outputlen])
+        - profile_predictions: Predicted profile probabilities (shape: [num_regions, outputlen])
+        - counts_predictions: Predicted log counts (shape: [num_regions])
+        - coordinates: Region coordinates (shape: [num_regions, 4])
+    """
+    num_batches=len(data_generator)
     profile_probs_predictions = []
     true_counts = []
     counts_sum_predictions = []
@@ -76,15 +106,15 @@ def predict_on_batch_wrapper(model,test_generator):
         if idx%100==0:
             print(str(idx)+'/'+str(num_batches))
         
-        batch_data = test_generator[idx]
+        batch_data = data_generator[idx]
         
         # Handle different generator types
         # CelltypeGenerator returns 3-element tuple (inputs, targets, sample_weights)
         # and provides coordinates via get_coords() method
-        if hasattr(test_generator, 'get_coords'):
+        if hasattr(data_generator, 'get_coords'):
             # CelltypeGenerator: use get_coords() method
             X, y = batch_data[:2]  # inputs, targets
-            coords = test_generator.get_coords(idx)
+            coords = data_generator.get_coords(idx)
         elif len(batch_data) == 3:
             # Standard generators: (inputs, targets, coords)
             X, y, coords = batch_data
@@ -104,10 +134,9 @@ def predict_on_batch_wrapper(model,test_generator):
                 # Model expects 2 inputs and data provides 2 inputs: use as-is
                 preds = model.predict_on_batch(X)
             else:
-                # Model expects 2 inputs but data provides 1 input: add default scaling factor
-                # This can happen when using standard generators with 2-input models
+                # Model expects 2 inputs but data provides 1 input: use provided scaling_factor
                 batch_size = X.shape[0] if hasattr(X, 'shape') else len(X)
-                scaling_factors = np.ones((batch_size, 1), dtype=np.float32)
+                scaling_factors = np.full((batch_size, 1), scaling_factor, dtype=np.float32)
                 preds = model.predict_on_batch([X, scaling_factors])
         else:
             # 1-input model: handle both tuple and single input
@@ -130,6 +159,14 @@ def predict_on_batch_wrapper(model,test_generator):
     return np.array(true_counts), np.array(profile_probs_predictions), np.array(true_counts_sum), np.array(counts_sum_predictions), np.array(coordinates)
 
 
+def predict_on_batch_wrapper(model, test_generator):
+    """
+    Backward compatibility wrapper for run_predictions.
+    Uses default scaling_factor=1.0 for 2-input models.
+    """
+    return run_predictions(model, test_generator, scaling_factor=1.0)
+
+
 def main(args):
 
 
@@ -140,7 +177,7 @@ def main(args):
 
 
     test_generator = initializers.initialize_generators(args, mode="test", parameters=None, return_coords=True)
-    true_counts, profile_probs_predictions, true_counts_sum, counts_sum_predictions, coordinates = predict_on_batch_wrapper(model, test_generator)
+    true_counts, profile_probs_predictions, true_counts_sum, counts_sum_predictions, coordinates = run_predictions(model, test_generator, scaling_factor=1.0)
 
 
     # generate prediction on test set and store metrics

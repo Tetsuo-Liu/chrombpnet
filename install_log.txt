@@ -1,0 +1,303 @@
+Obtaining file:///home/tetsuo/shimamura-lab/projects/chrombpnet_fork
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Requirement already satisfied: h5py>=2.10.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (3.14.0)
+Collecting matplotlib>=3.3.1 (from chrombpnet==1.0.1)
+  Using cached matplotlib-3.10.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (11 kB)
+Collecting matplotlib-venn==0.11.6 (from chrombpnet==1.0.1)
+  Using cached matplotlib-venn-0.11.6.tar.gz (29 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Requirement already satisfied: numpy==1.23.4 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (1.23.4)
+Requirement already satisfied: pandas>=1.3.4 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (2.3.1)
+Collecting pyfaidx==0.6.1 (from chrombpnet==1.0.1)
+  Using cached pyfaidx-0.6.1.tar.gz (32 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting scikit-learn>=1.1.2 (from chrombpnet==1.0.1)
+  Using cached scikit_learn-1.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (11 kB)
+Collecting scipy>=1.4.1 (from chrombpnet==1.0.1)
+  Using cached scipy-1.15.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+Collecting tensorflow==2.8.0 (from chrombpnet==1.0.1)
+  Using cached tensorflow-2.8.0-cp310-cp310-manylinux2010_x86_64.whl.metadata (2.9 kB)
+Requirement already satisfied: tensorflow-estimator==2.8.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (2.8.0)
+Requirement already satisfied: tensorflow-probability==0.15.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (0.15.0)
+Requirement already satisfied: protobuf==3.20 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from chrombpnet==1.0.1) (3.20.0)
+Collecting tqdm==4.48.2 (from chrombpnet==1.0.1)
+  Using cached tqdm-4.48.2-py2.py3-none-any.whl.metadata (53 kB)
+Collecting deepdish==0.3.7 (from chrombpnet==1.0.1)
+  Using cached deepdish-0.3.7-py2.py3-none-any.whl.metadata (856 bytes)
+Collecting deeplift==0.6.13.0 (from chrombpnet==1.0.1)
+  Using cached deeplift-0.6.13.0.tar.gz (30 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting modisco==0.5.16.0 (from chrombpnet==1.0.1)
+  Using cached modisco-0.5.16.0.tar.gz (217 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting modisco-lite==2.0.7 (from chrombpnet==1.0.1)
+  Using cached modisco_lite-2.0.7-py3-none-any.whl.metadata (646 bytes)
+Collecting weasyprint==52.5 (from chrombpnet==1.0.1)
+  Using cached WeasyPrint-52.5-py3-none-any.whl.metadata (3.5 kB)
+Collecting kundajelab-shap==1 (from chrombpnet==1.0.1)
+  Using cached kundajelab_shap-1-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_28_x86_64.whl.metadata (602 bytes)
+Collecting tables (from deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached tables-3.10.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.2 kB)
+Requirement already satisfied: ipython in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from kundajelab-shap==1->chrombpnet==1.0.1) (8.37.0)
+Collecting scikit-image (from kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached scikit_image-0.25.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+Collecting joblib>=0.11 (from modisco==0.5.16.0->chrombpnet==1.0.1)
+  Using cached joblib-1.5.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting leidenalg>=0.8.7 (from modisco==0.5.16.0->chrombpnet==1.0.1)
+  Using cached leidenalg-0.10.2-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (10 kB)
+Collecting psutil>=5.4.8 (from modisco==0.5.16.0->chrombpnet==1.0.1)
+  Using cached psutil-7.0.0-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (22 kB)
+Collecting numba>=0.53.1 (from modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached numba-0.61.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.8 kB)
+Collecting leidenalg>=0.8.7 (from modisco==0.5.16.0->chrombpnet==1.0.1)
+  Using cached leidenalg-0.8.10-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.5 kB)
+Collecting igraph==0.9.11 (from modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached igraph-0.9.11-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.0 kB)
+Collecting logomaker>=0.8 (from modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached logomaker-0.8.7-py3-none-any.whl.metadata (2.6 kB)
+Collecting hdf5plugin (from modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached hdf5plugin-5.1.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.7 kB)
+Collecting texttable>=1.6.2 (from igraph==0.9.11->modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached texttable-1.7.0-py2.py3-none-any.whl.metadata (9.8 kB)
+Requirement already satisfied: six in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from pyfaidx==0.6.1->chrombpnet==1.0.1) (1.17.0)
+Requirement already satisfied: setuptools>=0.7 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from pyfaidx==0.6.1->chrombpnet==1.0.1) (80.9.0)
+Requirement already satisfied: absl-py>=0.4.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (2.3.1)
+Requirement already satisfied: astunparse>=1.6.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (1.6.3)
+Requirement already satisfied: flatbuffers>=1.12 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (25.2.10)
+Requirement already satisfied: gast>=0.2.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (0.6.0)
+Requirement already satisfied: google-pasta>=0.1.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (0.2.0)
+Requirement already satisfied: keras-preprocessing>=1.1.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (1.1.2)
+Requirement already satisfied: libclang>=9.0.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (18.1.1)
+Requirement already satisfied: opt-einsum>=2.3.2 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (3.4.0)
+Requirement already satisfied: termcolor>=1.1.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (3.1.0)
+Requirement already satisfied: typing-extensions>=3.6.6 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (4.14.1)
+Requirement already satisfied: wrapt>=1.11.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (1.17.3)
+Requirement already satisfied: tensorboard<2.9,>=2.8 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (2.8.0)
+Requirement already satisfied: tf-estimator-nightly==2.8.0.dev2021122109 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (2.8.0.dev2021122109)
+Requirement already satisfied: keras<2.9,>=2.8.0rc0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (2.8.0)
+Requirement already satisfied: tensorflow-io-gcs-filesystem>=0.23.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (0.37.1)
+Requirement already satisfied: grpcio<2.0,>=1.24.3 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow==2.8.0->chrombpnet==1.0.1) (1.74.0)
+Requirement already satisfied: decorator in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow-probability==0.15.0->chrombpnet==1.0.1) (5.2.1)
+Requirement already satisfied: cloudpickle>=1.3 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow-probability==0.15.0->chrombpnet==1.0.1) (3.1.1)
+Requirement already satisfied: dm-tree in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorflow-probability==0.15.0->chrombpnet==1.0.1) (0.1.9)
+Collecting cffi>=0.6 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.5 kB)
+Collecting html5lib>=0.999999999 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached html5lib-1.1-py2.py3-none-any.whl.metadata (16 kB)
+Collecting cairocffi>=0.9.0 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached cairocffi-1.7.1-py3-none-any.whl.metadata (3.3 kB)
+Collecting tinycss2>=1.0.0 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached tinycss2-1.4.0-py3-none-any.whl.metadata (3.0 kB)
+Collecting cssselect2>=0.1 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached cssselect2-0.8.0-py3-none-any.whl.metadata (2.9 kB)
+Collecting CairoSVG>=2.4.0 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached cairosvg-2.8.2-py3-none-any.whl.metadata (2.7 kB)
+Collecting Pyphen>=0.9.1 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached pyphen-0.17.2-py3-none-any.whl.metadata (3.2 kB)
+Collecting Pillow>=4.0.0 (from weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached pillow-11.3.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.0 kB)
+Requirement already satisfied: google-auth<3,>=1.6.3 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (2.40.3)
+Requirement already satisfied: google-auth-oauthlib<0.5,>=0.4.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (0.4.6)
+Requirement already satisfied: markdown>=2.6.8 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.8.2)
+Requirement already satisfied: requests<3,>=2.21.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (2.32.5)
+Requirement already satisfied: tensorboard-data-server<0.7.0,>=0.6.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (0.6.1)
+Requirement already satisfied: tensorboard-plugin-wit>=1.6.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (1.8.1)
+Requirement already satisfied: werkzeug>=0.11.15 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.1.3)
+Requirement already satisfied: wheel>=0.26 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (0.45.1)
+Requirement already satisfied: cachetools<6.0,>=2.0.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from google-auth<3,>=1.6.3->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (5.5.2)
+Requirement already satisfied: pyasn1-modules>=0.2.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from google-auth<3,>=1.6.3->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (0.4.2)
+Requirement already satisfied: rsa<5,>=3.1.4 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from google-auth<3,>=1.6.3->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (4.9.1)
+Requirement already satisfied: requests-oauthlib>=0.7.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from google-auth-oauthlib<0.5,>=0.4.1->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (2.0.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.4.3)
+Requirement already satisfied: idna<4,>=2.5 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.10)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (2025.8.3)
+Requirement already satisfied: pyasn1>=0.1.3 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from rsa<5,>=3.1.4->google-auth<3,>=1.6.3->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (0.6.1)
+Collecting defusedxml (from CairoSVG>=2.4.0->weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached defusedxml-0.7.1-py2.py3-none-any.whl.metadata (32 kB)
+Collecting pycparser (from cffi>=0.6->weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached pycparser-2.22-py3-none-any.whl.metadata (943 bytes)
+Collecting webencodings (from cssselect2>=0.1->weasyprint==52.5->chrombpnet==1.0.1)
+  Using cached webencodings-0.5.1-py2.py3-none-any.whl.metadata (2.1 kB)
+Collecting contourpy>=1.0.1 (from matplotlib>=3.3.1->chrombpnet==1.0.1)
+  Using cached contourpy-1.3.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.5 kB)
+Collecting cycler>=0.10 (from matplotlib>=3.3.1->chrombpnet==1.0.1)
+  Using cached cycler-0.12.1-py3-none-any.whl.metadata (3.8 kB)
+Collecting fonttools>=4.22.0 (from matplotlib>=3.3.1->chrombpnet==1.0.1)
+  Using cached fonttools-4.59.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (108 kB)
+Collecting kiwisolver>=1.3.1 (from matplotlib>=3.3.1->chrombpnet==1.0.1)
+  Using cached kiwisolver-1.4.9-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata (6.3 kB)
+Requirement already satisfied: packaging>=20.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from matplotlib>=3.3.1->chrombpnet==1.0.1) (25.0)
+Collecting pyparsing>=2.3.1 (from matplotlib>=3.3.1->chrombpnet==1.0.1)
+  Using cached pyparsing-3.2.3-py3-none-any.whl.metadata (5.0 kB)
+Requirement already satisfied: python-dateutil>=2.7 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from matplotlib>=3.3.1->chrombpnet==1.0.1) (2.9.0.post0)
+Collecting llvmlite<0.45,>=0.44.0dev0 (from numba>=0.53.1->modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached llvmlite-0.44.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.8 kB)
+INFO: pip is looking at multiple versions of numba to determine which version is compatible with other requirements. This could take a while.
+Collecting numba>=0.53.1 (from modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached numba-0.61.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.8 kB)
+  Using cached numba-0.60.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.7 kB)
+Collecting llvmlite<0.44,>=0.43.0dev0 (from numba>=0.53.1->modisco-lite==2.0.7->chrombpnet==1.0.1)
+  Using cached llvmlite-0.43.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.8 kB)
+Requirement already satisfied: pytz>=2020.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from pandas>=1.3.4->chrombpnet==1.0.1) (2025.2)
+Requirement already satisfied: tzdata>=2022.7 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from pandas>=1.3.4->chrombpnet==1.0.1) (2025.2)
+Requirement already satisfied: oauthlib>=3.0.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from requests-oauthlib>=0.7.0->google-auth-oauthlib<0.5,>=0.4.1->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.3.1)
+Collecting threadpoolctl>=3.1.0 (from scikit-learn>=1.1.2->chrombpnet==1.0.1)
+  Using cached threadpoolctl-3.6.0-py3-none-any.whl.metadata (13 kB)
+INFO: pip is looking at multiple versions of scipy to determine which version is compatible with other requirements. This could take a while.
+Collecting scipy>=1.4.1 (from chrombpnet==1.0.1)
+  Using cached scipy-1.15.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+  Using cached scipy-1.15.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+  Using cached scipy-1.15.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+  Using cached scipy-1.14.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (60 kB)
+  Using cached scipy-1.14.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (60 kB)
+  Using cached scipy-1.13.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (60 kB)
+Requirement already satisfied: MarkupSafe>=2.1.1 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from werkzeug>=0.11.15->tensorboard<2.9,>=2.8->tensorflow==2.8.0->chrombpnet==1.0.1) (3.0.2)
+Requirement already satisfied: attrs>=18.2.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from dm-tree->tensorflow-probability==0.15.0->chrombpnet==1.0.1) (25.3.0)
+Requirement already satisfied: exceptiongroup in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (1.3.0)
+Requirement already satisfied: jedi>=0.16 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.19.2)
+Requirement already satisfied: matplotlib-inline in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.1.7)
+Requirement already satisfied: pexpect>4.3 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (4.9.0)
+Requirement already satisfied: prompt_toolkit<3.1.0,>=3.0.41 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (3.0.51)
+Requirement already satisfied: pygments>=2.4.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (2.19.2)
+Requirement already satisfied: stack_data in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.6.3)
+Requirement already satisfied: traitlets>=5.13.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from ipython->kundajelab-shap==1->chrombpnet==1.0.1) (5.14.3)
+Requirement already satisfied: wcwidth in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from prompt_toolkit<3.1.0,>=3.0.41->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.2.13)
+Requirement already satisfied: parso<0.9.0,>=0.8.4 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from jedi>=0.16->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.8.4)
+Requirement already satisfied: ptyprocess>=0.5 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from pexpect>4.3->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.7.0)
+INFO: pip is looking at multiple versions of scikit-image to determine which version is compatible with other requirements. This could take a while.
+Collecting scikit-image (from kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached scikit_image-0.25.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+  Using cached scikit_image-0.25.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+  Using cached scikit_image-0.24.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+Collecting networkx>=2.8 (from scikit-image->kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached networkx-3.4.2-py3-none-any.whl.metadata (6.3 kB)
+Collecting imageio>=2.33 (from scikit-image->kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached imageio-2.37.0-py3-none-any.whl.metadata (5.2 kB)
+Collecting tifffile>=2022.8.12 (from scikit-image->kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached tifffile-2025.5.10-py3-none-any.whl.metadata (31 kB)
+Collecting lazy-loader>=0.4 (from scikit-image->kundajelab-shap==1->chrombpnet==1.0.1)
+  Using cached lazy_loader-0.4-py3-none-any.whl.metadata (7.6 kB)
+Requirement already satisfied: executing>=1.2.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from stack_data->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (2.2.0)
+Requirement already satisfied: asttokens>=2.1.0 in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from stack_data->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (3.0.0)
+Requirement already satisfied: pure_eval in /home/tetsuo/miniconda3/envs/dp-model/lib/python3.10/site-packages (from stack_data->ipython->kundajelab-shap==1->chrombpnet==1.0.1) (0.2.3)
+Collecting numexpr>=2.6.2 (from tables->deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached numexpr-2.11.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.0 kB)
+Collecting py-cpuinfo (from tables->deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached py_cpuinfo-9.0.0-py3-none-any.whl.metadata (794 bytes)
+Collecting blosc2>=2.3.0 (from tables->deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached blosc2-3.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (7.1 kB)
+INFO: pip is looking at multiple versions of blosc2 to determine which version is compatible with other requirements. This could take a while.
+  Using cached blosc2-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (7.1 kB)
+  Using cached blosc2-3.6.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (7.0 kB)
+  Using cached blosc2-3.6.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-3.5.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-3.5.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-3.4.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-3.3.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.9 kB)
+INFO: pip is still looking at multiple versions of blosc2 to determine which version is compatible with other requirements. This could take a while.
+  Using cached blosc2-3.3.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-3.3.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.9 kB)
+  Using cached blosc2-2.7.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.1 kB)
+Collecting ndindex>=1.4 (from blosc2>=2.3.0->tables->deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached ndindex-1.10.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.6 kB)
+Collecting msgpack (from blosc2>=2.3.0->tables->deepdish==0.3.7->chrombpnet==1.0.1)
+  Using cached msgpack-1.1.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (8.4 kB)
+Using cached deepdish-0.3.7-py2.py3-none-any.whl (37 kB)
+Using cached kundajelab_shap-1-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_28_x86_64.whl (354 kB)
+Using cached modisco_lite-2.0.7-py3-none-any.whl (33 kB)
+Using cached igraph-0.9.11-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.2 MB)
+Using cached leidenalg-0.8.10-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+Downloading tensorflow-2.8.0-cp310-cp310-manylinux2010_x86_64.whl (497.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 497.6/497.6 MB 3.2 MB/s  0:00:57
+Downloading tqdm-4.48.2-py2.py3-none-any.whl (68 kB)
+Downloading WeasyPrint-52.5-py3-none-any.whl (365 kB)
+Downloading cairocffi-1.7.1-py3-none-any.whl (75 kB)
+Downloading cairosvg-2.8.2-py3-none-any.whl (45 kB)
+Downloading cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (446 kB)
+Downloading cssselect2-0.8.0-py3-none-any.whl (15 kB)
+Downloading html5lib-1.1-py2.py3-none-any.whl (112 kB)
+Downloading joblib-1.5.1-py3-none-any.whl (307 kB)
+Downloading logomaker-0.8.7-py3-none-any.whl (13.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.2/13.2 MB 61.2 MB/s  0:00:00
+Downloading matplotlib-3.10.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (8.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.7/8.7 MB 63.3 MB/s  0:00:00
+Downloading contourpy-1.3.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (325 kB)
+Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+Downloading fonttools-4.59.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.8/4.8 MB 59.1 MB/s  0:00:00
+Downloading kiwisolver-1.4.9-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 50.6 MB/s  0:00:00
+Downloading numba-0.60.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.7/3.7 MB 62.6 MB/s  0:00:00
+Downloading llvmlite-0.43.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.9/43.9 MB 83.1 MB/s  0:00:00
+Downloading pillow-11.3.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (6.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.6/6.6 MB 83.9 MB/s  0:00:00
+Downloading psutil-7.0.0-cp36-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (277 kB)
+Downloading pyparsing-3.2.3-py3-none-any.whl (111 kB)
+Downloading pyphen-0.17.2-py3-none-any.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 60.5 MB/s  0:00:00
+Downloading scikit_learn-1.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (9.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.7/9.7 MB 24.6 MB/s  0:00:00
+Downloading scipy-1.13.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (38.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 38.6/38.6 MB 75.0 MB/s  0:00:00
+Downloading texttable-1.7.0-py2.py3-none-any.whl (10 kB)
+Downloading threadpoolctl-3.6.0-py3-none-any.whl (18 kB)
+Downloading tinycss2-1.4.0-py3-none-any.whl (26 kB)
+Downloading webencodings-0.5.1-py2.py3-none-any.whl (11 kB)
+Downloading defusedxml-0.7.1-py2.py3-none-any.whl (25 kB)
+Downloading hdf5plugin-5.1.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (45.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.9/45.9 MB 11.7 MB/s  0:00:03
+Downloading pycparser-2.22-py3-none-any.whl (117 kB)
+Downloading scikit_image-0.24.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (14.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14.9/14.9 MB 91.4 MB/s  0:00:00
+Downloading imageio-2.37.0-py3-none-any.whl (315 kB)
+Downloading lazy_loader-0.4-py3-none-any.whl (12 kB)
+Downloading networkx-3.4.2-py3-none-any.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 63.7 MB/s  0:00:00
+Downloading tifffile-2025.5.10-py3-none-any.whl (226 kB)
+Downloading tables-3.10.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (7.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.6/7.6 MB 91.5 MB/s  0:00:00
+Downloading blosc2-2.7.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.4/4.4 MB 1.9 MB/s  0:00:02
+Downloading ndindex-1.10.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (501 kB)
+Downloading numexpr-2.11.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (399 kB)
+Downloading msgpack-1.1.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (408 kB)
+Downloading py_cpuinfo-9.0.0-py3-none-any.whl (22 kB)
+Building wheels for collected packages: deeplift, matplotlib-venn, modisco, pyfaidx
+  DEPRECATION: Building 'deeplift' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'deeplift'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+  Building wheel for deeplift (setup.py): started
+  Building wheel for deeplift (setup.py): finished with status 'done'
+  Created wheel for deeplift: filename=deeplift-0.6.13.0-py3-none-any.whl size=36458 sha256=901326233628f0d96f0ec803ab48f0681413dc74d858529a927946f0040303ef
+  Stored in directory: /home/tetsuo/.cache/pip/wheels/5d/d0/62/3f2d52f229601a9107ad95750d9b403c66063756100d374b6f
+  DEPRECATION: Building 'matplotlib-venn' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'matplotlib-venn'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+  Building wheel for matplotlib-venn (setup.py): started
+  Building wheel for matplotlib-venn (setup.py): finished with status 'done'
+  Created wheel for matplotlib-venn: filename=matplotlib_venn-0.11.6-py3-none-any.whl size=32123 sha256=66fd38399d56f02bfad0f5d3c43bbaaa055ea9d6718c9cb521e0558ebbbeafb0
+  Stored in directory: /home/tetsuo/.cache/pip/wheels/7a/bd/df/0070c3542ee2e4b9e4086ecafaaf7c8f789bd664fd79946169
+  DEPRECATION: Building 'modisco' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'modisco'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+  Building wheel for modisco (setup.py): started
+  Building wheel for modisco (setup.py): finished with status 'done'
+  Created wheel for modisco: filename=modisco-0.5.16.0-py3-none-any.whl size=233685 sha256=19008643fade3e2a423098329fb2c5e79161740bd6c5c09a17b67fb907a20536
+  Stored in directory: /home/tetsuo/.cache/pip/wheels/b3/d0/dc/d8b3e7468c296b0c96a94f5385fa11eadcd07fb0b894b097c0
+  DEPRECATION: Building 'pyfaidx' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'pyfaidx'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+  Building wheel for pyfaidx (setup.py): started
+  Building wheel for pyfaidx (setup.py): finished with status 'done'
+  Created wheel for pyfaidx: filename=pyfaidx-0.6.1-py3-none-any.whl size=26346 sha256=cb1a050153235636ffc9bbe8d5819f365106b719f542e7928f89c065cb130f0c
+  Stored in directory: /home/tetsuo/.cache/pip/wheels/f7/26/17/e627f5f9c8d8b7a2f14dfea136b92996ba4abab75888890943
+Successfully built deeplift matplotlib-venn modisco pyfaidx
+Installing collected packages: webencodings, texttable, py-cpuinfo, tqdm, tinycss2, tifffile, threadpoolctl, scipy, Pyphen, pyparsing, pyfaidx, pycparser, psutil, Pillow, numexpr, networkx, ndindex, msgpack, llvmlite, lazy-loader, kiwisolver, joblib, igraph, html5lib, fonttools, defusedxml, deeplift, cycler, contourpy, scikit-learn, numba, matplotlib, leidenalg, imageio, hdf5plugin, cssselect2, cffi, blosc2, tables, scikit-image, modisco, matplotlib-venn, logomaker, cairocffi, modisco-lite, kundajelab-shap, deepdish, CairoSVG, weasyprint, tensorflow, chrombpnet
+  Attempting uninstall: tqdm
+    Found existing installation: tqdm 4.67.1
+    Uninstalling tqdm-4.67.1:
+      Successfully uninstalled tqdm-4.67.1
+  DEPRECATION: Legacy editable install of chrombpnet==1.0.1 from file:///home/tetsuo/shimamura-lab/projects/chrombpnet_fork (setup.py develop) is deprecated. pip 25.3 will enforce this behaviour change. A possible replacement is to add a pyproject.toml or enable --use-pep517, and use setuptools >= 64. If the resulting installation is not behaving as expected, try using --config-settings editable_mode=compat. Please consult the setuptools documentation for more information. Discussion can be found at https://github.com/pypa/pip/issues/11457
+  Running setup.py develop for chrombpnet
+
+Successfully installed CairoSVG-2.8.2 Pillow-11.3.0 Pyphen-0.17.2 blosc2-2.7.1 cairocffi-1.7.1 cffi-1.17.1 chrombpnet-1.0.1 contourpy-1.3.2 cssselect2-0.8.0 cycler-0.12.1 deepdish-0.3.7 deeplift-0.6.13.0 defusedxml-0.7.1 fonttools-4.59.1 hdf5plugin-5.1.0 html5lib-1.1 igraph-0.9.11 imageio-2.37.0 joblib-1.5.1 kiwisolver-1.4.9 kundajelab-shap-1 lazy-loader-0.4 leidenalg-0.8.10 llvmlite-0.43.0 logomaker-0.8.7 matplotlib-3.10.5 matplotlib-venn-0.11.6 modisco-0.5.16.0 modisco-lite-2.0.7 msgpack-1.1.1 ndindex-1.10.0 networkx-3.4.2 numba-0.60.0 numexpr-2.11.0 psutil-7.0.0 py-cpuinfo-9.0.0 pycparser-2.22 pyfaidx-0.6.1 pyparsing-3.2.3 scikit-image-0.24.0 scikit-learn-1.7.1 scipy-1.13.1 tables-3.10.1 tensorflow-2.8.0 texttable-1.7.0 threadpoolctl-3.6.0 tifffile-2025.5.10 tinycss2-1.4.0 tqdm-4.48.2 weasyprint-52.5 webencodings-0.5.1
