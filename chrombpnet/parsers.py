@@ -241,6 +241,7 @@ def read_parser():
         optional_preds.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
         optional_preds.add_argument("-bw", "--bigwig", type=str, default=None, help="If provided .h5 with predictions are output along with calculated metrics considering bigwig as groundtruth.")
         optional_preds.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
+        optional_preds.add_argument("--target-celltype", type=str, default=None, help="Target cell type for multitask models (required when using multitask model with multiple output heads)")
        
         # Make contribution score bigwigs
         
@@ -259,6 +260,7 @@ def read_parser():
         optional_contribs.add_argument("-t", "--tqdm", type=int,default=1, help="Use tqdm. If yes then you need to have it installed.")
         optional_contribs.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
         optional_contribs.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
+        optional_contribs.add_argument("--target-celltype", type=str, default=None, help="Target cell type for multitask models (required when using multitask model with multiple output heads)")
     
    
         # Get marginal footprints

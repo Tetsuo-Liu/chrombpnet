@@ -24,6 +24,87 @@ NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summi
 # disable eager execution so shap deep explainer wont break
 tf.compat.v1.disable_eager_execution()
 
+def is_multitask_model(model):
+    """
+    Check if a model is a multitask model by examining output layer names.
+    
+    Args:
+        model: Keras model
+        
+    Returns:
+        bool: True if model is multitask (has multiple output heads with cell-type-specific names)
+    """
+    if len(model.outputs) <= 2:
+        return False
+    
+    # Check if output layer names follow multitask pattern (logits_profile_{celltype} or logcount_{celltype})
+    output_names = [layer.name for layer in model.outputs]
+    has_profile_heads = any(name.startswith('logits_profile_') for name in output_names)
+    has_count_heads = any(name.startswith('logcount_') for name in output_names)
+    
+    return has_profile_heads and has_count_heads
+
+def get_celltype_list_from_model(model):
+    """
+    Extract cell type list from multitask model output layer names.
+    
+    Args:
+        model: Keras multitask model
+        
+    Returns:
+        list: List of cell type names, or None if not a multitask model
+    """
+    if not is_multitask_model(model):
+        return None
+    
+    # Extract cell types from profile output layer names
+    celltypes = set()
+    for layer in model.outputs:
+        name = layer.name
+        if name.startswith('logits_profile_'):
+            celltype = name.replace('logits_profile_', '')
+            celltypes.add(celltype)
+        elif name.startswith('logcount_'):
+            celltype = name.replace('logcount_', '')
+            celltypes.add(celltype)
+    
+    # Return sorted list for consistency
+    return sorted(list(celltypes))
+
+def select_multitask_output_head(model, target_celltype, output_type='profile'):
+    """
+    Select a specific output head from a multitask model.
+    
+    Args:
+        model: Keras multitask model
+        target_celltype: Target cell type name
+        output_type: 'profile' or 'counts'
+        
+    Returns:
+        tuple: (output_layer, output_index) or (None, None) if not found
+    """
+    if not is_multitask_model(model):
+        return None, None
+    
+    if output_type == 'profile':
+        target_name = f'logits_profile_{target_celltype}'
+    elif output_type == 'counts':
+        target_name = f'logcount_{target_celltype}'
+    else:
+        raise ValueError(f"Invalid output_type: {output_type}. Must be 'profile' or 'counts'")
+    
+    # Find output layer by name
+    for idx, layer in enumerate(model.outputs):
+        if layer.name == target_name:
+            return layer, idx
+    
+    # If not found, raise error with available cell types
+    available_celltypes = get_celltype_list_from_model(model)
+    raise ValueError(
+        f"Output head '{target_name}' not found in model. "
+        f"Available cell types: {available_celltypes}"
+    )
+
 def fetch_interpret_args():
     parser = argparse.ArgumentParser(description="get sequence contribution scores for the model")
     parser.add_argument("-g", "--genome", type=str, required=True, help="Genome fasta")
@@ -35,6 +116,7 @@ def fetch_interpret_args():
                         help="use either counts or profile or both for running shap")
     parser.add_argument("--chunk-size", type=int, default=None, help="Chunk size for memory-efficient processing (auto-detect if not specified)")
     parser.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
+    parser.add_argument("--target-celltype", type=str, default=None, help="Target cell type for multitask models (required when using multitask model with multiple output heads)")
 
     args = parser.parse_args()
     return args
@@ -97,12 +179,23 @@ def combine_chunk_results(chunk_results):
     
     return combined
 
-def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0):
+def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0, target_celltype=None):
     """
     Perform interpretation with chunked processing for memory efficiency.
     """
     total_sequences = len(seqs)
     print(f"Seqs dimension : {seqs.shape}")
+    
+    # Check if model is multitask
+    is_multitask = is_multitask_model(model)
+    if is_multitask:
+        if target_celltype is None:
+            available_celltypes = get_celltype_list_from_model(model)
+            raise ValueError(
+                f"Multitask model detected with {len(available_celltypes)} cell types, but --target-celltype not specified. "
+                f"Available cell types: {available_celltypes}"
+            )
+        logging.info(f"Detected multitask model, using target cell type: {target_celltype}")
     
     # Check if model has 2 inputs (dynamic scaling model)
     is_2input_model = len(model.inputs) == 2
@@ -120,22 +213,38 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
     
     if "counts" in profile_or_counts:
         logging.info("Initializing counts explainer...")
+        # Select output head for multitask models
+        if is_multitask:
+            _, count_output_idx = select_multitask_output_head(model, target_celltype, output_type='counts')
+            count_output = model.outputs[count_output_idx]
+        else:
+            count_output = model.outputs[1] if len(model.outputs) > 1 else model.outputs[0]
+        
         if is_2input_model:
             # For 2-input models, use first input (sequence) only for SHAP
             # Scaling factor is constant and doesn't affect gradients
             explainers['counts'] = shap.explainers.deep.TFDeepExplainer(
-                (model.inputs[0], tf.reduce_sum(model.outputs[1], axis=-1)),
+                (model.inputs[0], tf.reduce_sum(count_output, axis=-1)),
                 shap_utils.shuffle_several_times,
                 combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
         else:
             explainers['counts'] = shap.explainers.deep.TFDeepExplainer(
-                (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
+                (model.input, tf.reduce_sum(count_output, axis=-1)),
                 shap_utils.shuffle_several_times,
                 combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
     
     if "profile" in profile_or_counts:
         logging.info("Initializing profile explainer...")
-        weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
+        # Select output head for multitask models
+        if is_multitask:
+            profile_output_layer, _ = select_multitask_output_head(model, target_celltype, output_type='profile')
+            # Create a wrapper model with only the selected output for SHAP
+            # This is needed because get_weightedsum_meannormed_logits expects a model with specific output structure
+            wrapper_model = tf.keras.Model(inputs=model.inputs, outputs=profile_output_layer)
+            weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(wrapper_model)
+        else:
+            weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
+        
         if is_2input_model:
             # For 2-input models, use first input (sequence) only for SHAP
             explainers['profile'] = shap.explainers.deep.TFDeepExplainer(
@@ -217,7 +326,7 @@ def interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size=
         dd.io.save(f"{output_prefix}.profile_scores.h5", combined_profile, compression='blosc')
         logging.info(f"Profile scores saved to {output_prefix}.profile_scores.h5")
 
-def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0):
+def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, scaling_factor=1.0, target_celltype=None):
     """
     Wrapper function to maintain backward compatibility.
     Uses chunked processing for large datasets.
@@ -225,10 +334,21 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, sc
     # Use chunked processing for datasets larger than 1000 sequences
     if len(seqs) > 1000:
         logging.info(f"Large dataset detected ({len(seqs)} sequences), using chunked processing")
-        return interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor)
+        return interpret_chunked(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor, target_celltype)
     
     # Original implementation for smaller datasets
     print("Seqs dimension : {}".format(seqs.shape))
+    
+    # Check if model is multitask
+    is_multitask = is_multitask_model(model)
+    if is_multitask:
+        if target_celltype is None:
+            available_celltypes = get_celltype_list_from_model(model)
+            raise ValueError(
+                f"Multitask model detected with {len(available_celltypes)} cell types, but --target-celltype not specified. "
+                f"Available cell types: {available_celltypes}"
+            )
+        logging.info(f"Detected multitask model, using target cell type: {target_celltype}")
     
     # Check if model has 2 inputs (dynamic scaling model)
     is_2input_model = len(model.inputs) == 2
@@ -236,14 +356,21 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, sc
         logging.info(f"Detected 2-input model, using scaling_factor={scaling_factor}")
 
     if "counts" in profile_or_counts:
+        # Select output head for multitask models
+        if is_multitask:
+            _, count_output_idx = select_multitask_output_head(model, target_celltype, output_type='counts')
+            count_output = model.outputs[count_output_idx]
+        else:
+            count_output = model.outputs[1] if len(model.outputs) > 1 else model.outputs[0]
+        
         if is_2input_model:
             profile_model_counts_explainer = shap.explainers.deep.TFDeepExplainer(
-                (model.inputs[0], tf.reduce_sum(model.outputs[1], axis=-1)),
+                (model.inputs[0], tf.reduce_sum(count_output, axis=-1)),
                 shap_utils.shuffle_several_times,
                 combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
         else:
             profile_model_counts_explainer = shap.explainers.deep.TFDeepExplainer(
-                (model.input, tf.reduce_sum(model.outputs[1], axis=-1)),
+                (model.input, tf.reduce_sum(count_output, axis=-1)),
                 shap_utils.shuffle_several_times,
                 combine_mult_and_diffref=shap_utils.combine_mult_and_diffref)
 
@@ -261,7 +388,15 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, sc
         del counts_shap_scores, counts_scores_dict
 
     if "profile" in profile_or_counts:
-        weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
+        # Select output head for multitask models
+        if is_multitask:
+            profile_output_layer, _ = select_multitask_output_head(model, target_celltype, output_type='profile')
+            # Create a wrapper model with only the selected output for SHAP
+            wrapper_model = tf.keras.Model(inputs=model.inputs, outputs=profile_output_layer)
+            weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(wrapper_model)
+        else:
+            weightedsum_meannormed_logits = shap_utils.get_weightedsum_meannormed_logits(model)
+        
         if is_2input_model:
             profile_model_profile_explainer = shap.explainers.deep.TFDeepExplainer(
                 (model.inputs[0], weightedsum_meannormed_logits),
@@ -286,7 +421,7 @@ def interpret(model, seqs, output_prefix, profile_or_counts, chunk_size=None, sc
 
 
 def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix, 
-                     profile_or_counts=["counts", "profile"], debug_chr=None, chunk_size=None, scaling_factor=1.0):
+                     profile_or_counts=["counts", "profile"], debug_chr=None, chunk_size=None, scaling_factor=1.0, target_celltype=None):
     """
     Core interpretation logic extracted from main().
     
@@ -329,7 +464,7 @@ def interpret_regions(genome_path, regions_path, model_h5_path, output_prefix,
 
     regions_df[peaks_used].to_csv("{}.interpreted_regions.bed".format(output_prefix), header=False, index=False, sep='\t')
 
-    interpret(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor)
+    interpret(model, seqs, output_prefix, profile_or_counts, chunk_size, scaling_factor, target_celltype)
     
     return {
         'total_regions': len(regions_df),
@@ -359,7 +494,8 @@ def main(args):
         profile_or_counts=args.profile_or_counts,
         debug_chr=args.debug_chr,
         chunk_size=getattr(args, 'chunk_size', None),
-        scaling_factor=getattr(args, 'scaling_factor', 1.0)
+        scaling_factor=getattr(args, 'scaling_factor', 1.0),
+        target_celltype=getattr(args, 'target_celltype', None)
     )
 
 if __name__ == '__main__':

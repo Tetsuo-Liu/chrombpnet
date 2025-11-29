@@ -13,6 +13,7 @@ import chrombpnet.training.utils.one_hot as one_hot
 import h5py
 import json
 from chrombpnet.training.utils.bed_utils import read_bed_with_summit
+from chrombpnet.evaluation.interpret.interpret import is_multitask_model, get_celltype_list_from_model, select_multitask_output_head
 
 NARROWPEAK_SCHEMA = ["chr", "start", "end", "1", "2", "3", "4", "5", "6", "summit"]
 
@@ -104,6 +105,7 @@ def parse_args():
     parser.add_argument("-d", "--debug-chr", nargs="+", type=str, default=None, help="Run for specific chromosomes only (e.g. chr1 chr2) for debugging")
     parser.add_argument("-bw", "--bigwig", type=str, default=None, help="If provided .h5 with predictions are output along with calculated metrics considering bigwig as groundtruth.")
     parser.add_argument("--scaling-factor", type=float, default=1.0, help="Scaling factor for 2-input models (default: 1.0, used when model has 2 inputs)")
+    parser.add_argument("--target-celltype", type=str, default=None, help="Target cell type for multitask models (required when using multitask model with multiple output heads)")
     args = parser.parse_args()
     assert (args.bias_model is None) + (args.chrombpnet_model is None) + (args.chrombpnet_model_nb is None) < 3, "No input model provided!"
     print(args)
@@ -128,8 +130,31 @@ def main(args):
 
     if args.chrombpnet_model_nb:
         model_chrombpnet_nb = load_model_wrapper(model_hdf5=args.chrombpnet_model_nb)
-        inputlen = int(model_chrombpnet_nb.input_shape[1])
-        outputlen = int(model_chrombpnet_nb.output_shape[0][1])
+        
+        # Check if model is multitask
+        is_multitask = is_multitask_model(model_chrombpnet_nb)
+        if is_multitask:
+            if args.target_celltype is None:
+                available_celltypes = get_celltype_list_from_model(model_chrombpnet_nb)
+                raise ValueError(
+                    f"Multitask model detected with {len(available_celltypes)} cell types, but --target-celltype not specified. "
+                    f"Available cell types: {available_celltypes}"
+                )
+            print(f"Detected multitask model, using target cell type: {args.target_celltype}")
+            # Get output indices for the target cell type
+            _, profile_idx = select_multitask_output_head(model_chrombpnet_nb, args.target_celltype, output_type='profile')
+            _, count_idx = select_multitask_output_head(model_chrombpnet_nb, args.target_celltype, output_type='counts')
+        
+        # Infer input/output lengths
+        if len(model_chrombpnet_nb.inputs) == 2:
+            inputlen = int(model_chrombpnet_nb.inputs[0].shape[1])
+        else:
+            inputlen = int(model_chrombpnet_nb.input_shape[1])
+        
+        if is_multitask:
+            outputlen = int(model_chrombpnet_nb.output_shape[profile_idx][1])
+        else:
+            outputlen = int(model_chrombpnet_nb.output_shape[0][1])
 
         # load data
         regions_df = read_bed_with_summit(args.regions)
@@ -149,16 +174,22 @@ def main(args):
         if len(model_chrombpnet_nb.inputs) == 2:
             # 2-input model: provide scaling factors
             scaling_factors = np.full((len(seqs), 1), args.scaling_factor, dtype=np.float32)
-            pred_logits_wo_bias, pred_logcts_wo_bias = model_chrombpnet_nb.predict([seqs, scaling_factors],
+            all_outputs = model_chrombpnet_nb.predict([seqs, scaling_factors],
                                               batch_size = args.batch_size,
                                               verbose=True)
         else:
             # 1-input model: standard prediction
-            pred_logits_wo_bias, pred_logcts_wo_bias = model_chrombpnet_nb.predict([seqs],
+            all_outputs = model_chrombpnet_nb.predict([seqs],
                                               batch_size = args.batch_size,
                                               verbose=True)
-
-        pred_logits_wo_bias = np.squeeze(pred_logits_wo_bias)
+        
+        # Select outputs for multitask models
+        if is_multitask:
+            pred_logits_wo_bias = np.squeeze(all_outputs[profile_idx])
+            pred_logcts_wo_bias = np.squeeze(all_outputs[count_idx])
+        else:
+            pred_logits_wo_bias = np.squeeze(all_outputs[0])
+            pred_logcts_wo_bias = np.squeeze(all_outputs[1])
 
 
         bigwig_helper.write_bigwig(softmax(pred_logits_wo_bias) * (np.expand_dims(np.exp(pred_logcts_wo_bias)[:,0],axis=1)), 
@@ -176,8 +207,31 @@ def main(args):
 
     if args.chrombpnet_model:
         model_chrombpnet = load_model_wrapper(model_hdf5=args.chrombpnet_model)
-        inputlen = int(model_chrombpnet.input_shape[1])
-        outputlen = int(model_chrombpnet.output_shape[0][1])
+        
+        # Check if model is multitask
+        is_multitask = is_multitask_model(model_chrombpnet)
+        if is_multitask:
+            if args.target_celltype is None:
+                available_celltypes = get_celltype_list_from_model(model_chrombpnet)
+                raise ValueError(
+                    f"Multitask model detected with {len(available_celltypes)} cell types, but --target-celltype not specified. "
+                    f"Available cell types: {available_celltypes}"
+                )
+            print(f"Detected multitask model, using target cell type: {args.target_celltype}")
+            # Get output indices for the target cell type
+            _, profile_idx = select_multitask_output_head(model_chrombpnet, args.target_celltype, output_type='profile')
+            _, count_idx = select_multitask_output_head(model_chrombpnet, args.target_celltype, output_type='counts')
+        
+        # Infer input/output lengths
+        if len(model_chrombpnet.inputs) == 2:
+            inputlen = int(model_chrombpnet.inputs[0].shape[1])
+        else:
+            inputlen = int(model_chrombpnet.input_shape[1])
+        
+        if is_multitask:
+            outputlen = int(model_chrombpnet.output_shape[profile_idx][1])
+        else:
+            outputlen = int(model_chrombpnet.output_shape[0][1])
 
         # load data
         regions_df = read_bed_with_summit(args.regions)
@@ -197,17 +251,22 @@ def main(args):
         if len(model_chrombpnet.inputs) == 2:
             # 2-input model: provide scaling factors
             scaling_factors = np.full((len(seqs), 1), args.scaling_factor, dtype=np.float32)
-            pred_logits, pred_logcts = model_chrombpnet.predict([seqs, scaling_factors],
+            all_outputs = model_chrombpnet.predict([seqs, scaling_factors],
                                           batch_size = args.batch_size,
                                           verbose=True)
         else:
             # 1-input model: standard prediction
-            pred_logits, pred_logcts = model_chrombpnet.predict([seqs],
+            all_outputs = model_chrombpnet.predict([seqs],
                                           batch_size = args.batch_size,
                                           verbose=True)
-
-
-        pred_logits = np.squeeze(pred_logits)
+        
+        # Select outputs for multitask models
+        if is_multitask:
+            pred_logits = np.squeeze(all_outputs[profile_idx])
+            pred_logcts = np.squeeze(all_outputs[count_idx])
+        else:
+            pred_logits = np.squeeze(all_outputs[0])
+            pred_logcts = np.squeeze(all_outputs[1])
 
 
         bigwig_helper.write_bigwig(softmax(pred_logits) * (np.expand_dims(np.exp(pred_logcts)[:,0],axis=1)),
