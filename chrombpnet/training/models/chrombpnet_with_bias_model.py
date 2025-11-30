@@ -24,6 +24,51 @@ def load_pretrained_bias(model_hdf5):
     return pretrained_bias_model
 
 
+def build_encoder(input_tensor, filters, n_dil_layers):
+    """
+    Build the shared encoder part of BPNet model.
+    Returns the intermediate output (before profile/count heads).
+    
+    Args:
+        input_tensor: Input tensor for the encoder (sequence)
+        filters: Number of filters for convolutional layers
+        n_dil_layers: Number of dilated convolutional layers
+        
+    Returns:
+        Tensor: Encoder intermediate output (shared_encoder_intermediate)
+    """
+    x = input_tensor
+    
+    # First convolution without dilation
+    x = Conv1D(filters,
+                kernel_size=21,
+                padding='valid',
+                activation='relu',
+                name='wo_bias_bpnet_1st_conv')(x)
+    
+    # Dilated convolutions with residual connections
+    layer_names = [str(i) for i in range(1, n_dil_layers + 1)]
+    for i in range(1, n_dil_layers + 1):
+        conv_layer_name = 'wo_bias_bpnet_{}conv'.format(layer_names[i-1])
+        crop_layer_name = 'wo_bias_bpnet_{}crop'.format(layer_names[i-1])
+        
+        conv_x = Conv1D(filters,
+                        kernel_size=3,
+                        padding='valid',
+                        activation='relu',
+                        dilation_rate=2**i,
+                        name=conv_layer_name)(x)
+        
+        x_len = int_shape(x)[1]
+        conv_x_len = int_shape(conv_x)[1]
+        assert((x_len - conv_x_len) % 2 == 0)  # Necessary for symmetric cropping
+        
+        x = Cropping1D((x_len - conv_x_len) // 2, name=crop_layer_name)(x)
+        x = add([conv_x, x])
+    
+    return x
+
+
 def bpnet_model(filters, n_dil_layers, sequence_len, out_pred_len):
 
     conv1_kernel_size=21
@@ -33,30 +78,8 @@ def bpnet_model(filters, n_dil_layers, sequence_len, out_pred_len):
     #define inputs
     inp = Input(shape=(sequence_len, 4),name='sequence')    
 
-    # first convolution without dilation
-    x = Conv1D(filters,
-                kernel_size=conv1_kernel_size,
-                padding='valid', 
-                activation='relu',
-                name='wo_bias_bpnet_1st_conv')(inp)
-
-    layer_names = [str(i) for i in range(1,n_dil_layers+1)]
-    for i in range(1, n_dil_layers + 1):
-        # dilated convolution
-        conv_layer_name = 'wo_bias_bpnet_{}conv'.format(layer_names[i-1])
-        conv_x = Conv1D(filters, 
-                        kernel_size=3, 
-                        padding='valid',
-                        activation='relu', 
-                        dilation_rate=2**i,
-                        name=conv_layer_name)(x)
-
-        x_len = int_shape(x)[1]
-        conv_x_len = int_shape(conv_x)[1]
-        assert((x_len - conv_x_len) % 2 == 0) # Necessary for symmetric cropping
-
-        x = Cropping1D((x_len - conv_x_len) // 2, name="wo_bias_bpnet_{}crop".format(layer_names[i-1]))(x)
-        x = add([conv_x, x])
+    # Build encoder
+    x = build_encoder(inp, filters, n_dil_layers)
 
     # Branch 1. Profile prediction
     # Step 1.1 - 1D convolution with a very large kernel
@@ -106,6 +129,18 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
     # Check if multitask learning is enabled (for multitask_celltype generator)
     use_multitask = hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype'
     
+    # Debug: Log model construction parameters (use stderr to ensure visibility)
+    import sys
+    print(f"DEBUG: Model construction - hasattr(args, 'data_generator_type'): {hasattr(args, 'data_generator_type')}", file=sys.stderr)
+    if hasattr(args, 'data_generator_type'):
+        print(f"DEBUG: Model construction - args.data_generator_type: {args.data_generator_type}", file=sys.stderr)
+    print(f"DEBUG: Model construction - use_multitask: {use_multitask}", file=sys.stderr)
+    print(f"DEBUG: Model construction - use_dynamic_scaling: {use_dynamic_scaling}", file=sys.stderr)
+    if use_multitask:
+        print(f"DEBUG: Model construction - celltypes in model_params: {'celltypes' in model_params.keys()}", file=sys.stderr)
+        if 'celltypes' in model_params.keys():
+            print(f"DEBUG: Model construction - celltypes: {model_params['celltypes']}", file=sys.stderr)
+    
     # For multitask learning, celltype list is required
     if use_multitask:
         assert('celltypes' in model_params.keys()), "celltypes list not specified for multitask model"
@@ -121,6 +156,7 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
 
     bias_model = load_pretrained_bias(bias_model_path)
     bpnet_model_wo_bias = bpnet_model(filters, n_dil_layers, sequence_len, out_pred_len)
+    # bpnet_model already returns a Model with name="model_wo_bias", so no need to wrap it
 
     #read in arguments
     seed=args.seed
@@ -136,8 +172,11 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
         # Requires dynamic scaling (2-input model)
         inp_scale = Input(shape=(1,), name='scaling_factor')
         
-        # Get shared encoder output (once)
-        output_wo_bias = bpnet_model_wo_bias(inp_seq)
+        # Build encoder with new input tensor
+        shared_encoder_intermediate = build_encoder(inp_seq, filters, n_dil_layers)
+        
+        # Get GAP output for count heads (compute once, reuse for all cell types)
+        gap_output = GlobalAvgPool1D(name='gap')(shared_encoder_intermediate)
         
         # Get bias output and apply dynamic scaling
         bias_output = bias_model(inp_seq)
@@ -150,11 +189,6 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
         # Create decoder heads for each cell type
         profile_outputs = []
         count_outputs = []
-        
-        # Access shared encoder's intermediate layers for decoder heads
-        # Get the layer before profile/count predictions (the dilated conv output)
-        # This is the input to the GAP layer (for counts) and the profile Conv1D layer
-        shared_encoder_intermediate = bpnet_model_wo_bias.get_layer('gap').input
         
         # Create profile and count decoder heads for each cell type
         for cell_type in celltype_list:
@@ -180,8 +214,7 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
             profile_outputs.append(final_prof)
             
             # Count decoder head: Dense -> Add bias
-            # Use GAP output from shared encoder
-            gap_output = bpnet_model_wo_bias.get_layer('gap').output
+            # Use GAP output from shared encoder (computed above)
             count_head = Dense(1, name=f'logcount_pred_{cell_type}')(gap_output)
             concat_counts = Concatenate(axis=-1)([count_head, scaled_bias_logcounts])
             final_count = Lambda(lambda x: tf.math.reduce_logsumexp(x, axis=-1, keepdims=True),
@@ -191,6 +224,11 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
         # Create model with all outputs
         all_outputs = profile_outputs + count_outputs
         model = Model(inputs=[inp_seq, inp_scale], outputs=all_outputs)
+        
+        # Debug: Log model outputs
+        import sys
+        print(f"DEBUG: Multitask model created with {len(all_outputs)} outputs", file=sys.stderr)
+        print(f"DEBUG: Output names: {[out.name for out in all_outputs]}", file=sys.stderr)
         
         # Define loss functions and loss weights as dictionaries
         loss_dict = {}
@@ -204,6 +242,8 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
         model.compile(optimizer=Adam(learning_rate=args.learning_rate),
                      loss=loss_dict,
                      loss_weights=loss_weights_dict)
+        
+        print(f"DEBUG: Multitask model compiled successfully", file=sys.stderr)
         
         return model
     
@@ -273,15 +313,107 @@ def getModelGivenModelOptionsAndWeightInits(args, model_params):
 
 def save_model_without_bias(model, output_prefix):
     """
-    Extract and save the TF model without bias component.
-    Works for both 1-input and 2-input models.
-    For 2-input models, only the sequence input is used (scaling_factor is not needed for TF-only predictions).
-    """
-    model_wo_bias = model.get_layer("model_wo_bias").output
-    #counts_output_without_bias = model.get_layer("wo_bias_bpnet_logcount_predictions").output
+    Extract and save models without bias component.
+    For multitask models, saves two models:
+    1. Shared encoder model (_encoder.h5): For SCAR-Net embedding extraction
+    2. Bias-corrected multitask model (_nobias.h5): For evaluation/interpretation
     
-    # Get inputs from model_wo_bias (always single input: sequence only)
-    # This works for both 1-input and 2-input parent models
-    model_without_bias = Model(inputs=model.get_layer("model_wo_bias").inputs, outputs=[model_wo_bias[0], model_wo_bias[1]])
-    print('save model without bias') 
-    model_without_bias.save(output_prefix+"_nobias.h5")
+    Works for both standard and multitask models.
+    For 2-input models, only the sequence input is used.
+    """
+    # Check if this is a multitask model by examining output names
+    output_names = [out.name for out in model.outputs]
+    is_multitask = any('logits_profile_' in name and name != 'logits_profile_predictions' 
+                       for name in output_names)
+    
+    if is_multitask:
+        # Multitask model: extract encoder and bias-corrected multitask model
+        
+        # Get sequence input (first input for 2-input models, only input for 1-input models)
+        if len(model.inputs) == 2:
+            inp_seq = model.inputs[0]  # sequence input
+        else:
+            inp_seq = model.inputs[0]
+        
+        # 1. Extract shared encoder model (_encoder.h5)
+        # Find the shared encoder intermediate output
+        # This is the output before decoder heads branch
+        # Look for the first prof_out_precrop layer and get its input
+        first_prof_layer_name = None
+        for layer in model.layers:
+            if 'prof_out_precrop_' in layer.name:
+                first_prof_layer_name = layer.name
+                break
+        
+        if first_prof_layer_name:
+            first_prof_layer = model.get_layer(first_prof_layer_name)
+            # Get the input tensor of this layer (this is shared_encoder_intermediate)
+            shared_encoder_output = first_prof_layer.input
+            
+            # Create encoder model
+            encoder_model = Model(inputs=inp_seq, outputs=shared_encoder_output, 
+                                 name="shared_encoder")
+            encoder_model.save(output_prefix + "_encoder.h5")
+            print(f'Saved shared encoder model: {output_prefix}_encoder.h5')
+        else:
+            print(f'WARNING: Could not find prof_out_precrop layer, skipping encoder model extraction')
+        
+        # 2. Extract bias-corrected multitask model (_nobias.h5)
+        # Get outputs before bias addition (prof_flattened and count_head for each cell type)
+        nobias_outputs = []
+        
+        # Extract cell type names from output names
+        celltype_names = set()
+        for out_name in output_names:
+            if 'logits_profile_' in out_name:
+                celltype = out_name.replace('logits_profile_', '')
+                if celltype != 'predictions':  # Skip standard model outputs
+                    celltype_names.add(celltype)
+        
+        celltype_names = sorted(list(celltype_names))
+        
+        for cell_type in celltype_names:
+            # Profile output: get prof_flattened (before Add with bias)
+            try:
+                prof_add_layer = model.get_layer(f'logits_profile_{cell_type}')
+                # Add layer has two inputs: [prof_flattened, scaled_bias_profile]
+                # Get the first input (prof_flattened)
+                if isinstance(prof_add_layer.input, list):
+                    prof_flattened = prof_add_layer.input[0]
+                else:
+                    # If input is a single tensor, it might be wrapped
+                    prof_flattened = prof_add_layer.input
+                nobias_outputs.append(prof_flattened)
+            except Exception as e:
+                print(f'WARNING: Could not extract profile output for {cell_type}: {e}')
+                continue
+            
+            # Count output: get count_head (before Lambda logsumexp)
+            try:
+                count_head_layer = model.get_layer(f'logcount_pred_{cell_type}')
+                count_head = count_head_layer.output
+                nobias_outputs.append(count_head)
+            except Exception as e:
+                print(f'WARNING: Could not extract count output for {cell_type}: {e}')
+                continue
+        
+        if nobias_outputs:
+            # Create bias-corrected multitask model
+            nobias_model = Model(inputs=inp_seq, outputs=nobias_outputs, 
+                                name="multitask_model_nobias")
+            nobias_model.save(output_prefix + "_nobias.h5")
+            print(f'Saved bias-corrected multitask model: {output_prefix}_nobias.h5')
+        else:
+            print(f'WARNING: No outputs extracted, skipping nobias model save')
+        
+    else:
+        # Standard model: use existing logic
+        try:
+            model_wo_bias = model.get_layer("model_wo_bias").output
+            model_without_bias = Model(inputs=model.get_layer("model_wo_bias").inputs, 
+                                       outputs=[model_wo_bias[0], model_wo_bias[1]])
+            print('Saved model without bias')
+            model_without_bias.save(output_prefix + "_nobias.h5")
+        except Exception as e:
+            print(f'ERROR: Could not extract model without bias: {e}')
+            raise
