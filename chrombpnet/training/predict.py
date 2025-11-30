@@ -171,15 +171,51 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             celltype_to_count_idx = {}
             
             # Get celltype order from model output names
+            # Model outputs are ordered as: [profile_1, ..., profile_N, count_1, ..., count_N]
+            # where N is the number of celltypes
             num_celltypes = len(model.outputs) // 2
+            
+            # Get output names from model layers
+            # For multitask models, we need to find the actual output layer names
+            # by checking the model's layer graph
+            output_names_list = []
             for i, output_layer in enumerate(model.outputs):
-                output_name = output_layer.name
-                if output_name.startswith('logits_profile_'):
+                layer_name = None
+                # Try to find the layer that produces this output
+                # by checking all layers in the model (reverse order for efficiency)
+                for layer in reversed(model.layers):
+                    # Check if this layer's output is the output_layer we're looking for
+                    if hasattr(layer, 'output'):
+                        if layer.output is output_layer:
+                            layer_name = layer.name
+                            break
+                    # Also check if layer has multiple outputs
+                    if hasattr(layer, 'outputs') and output_layer in layer.outputs:
+                        layer_name = layer.name
+                        break
+                
+                # If still not found, use output_layer.name as fallback
+                if layer_name is None:
+                    layer_name = output_layer.name
+                
+                output_names_list.append(layer_name)
+            
+            # Debug: Log output names for first batch
+            if idx == 0:
+                print(f"DEBUG: Output names list: {output_names_list}")
+                print(f"DEBUG: Model layer names with 'logits_profile_' or 'logcount_':")
+                for layer in model.layers:
+                    if hasattr(layer, 'name') and (layer.name.startswith('logits_profile_') or layer.name.startswith('logcount_')):
+                        print(f"  - {layer.name}")
+            
+            # Extract celltype names from output names
+            for i, output_name in enumerate(output_names_list):
+                if output_name and output_name.startswith('logits_profile_'):
                     celltype_name = output_name.replace('logits_profile_', '')
                     if celltype_name not in celltype_names:
                         celltype_names.append(celltype_name)
                     celltype_to_profile_idx[celltype_name] = i
-                elif output_name.startswith('logcount_'):
+                elif output_name and output_name.startswith('logcount_'):
                     celltype_name = output_name.replace('logcount_', '')
                     celltype_to_count_idx[celltype_name] = i
             
@@ -193,7 +229,14 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
             
             # Check if this is a multitask model (multiple outputs) or single-output model (bias model)
             # A multitask model should have celltype-specific output names starting with 'logits_profile_' or 'logcount_'
-            is_actual_multitask_model = len(celltype_names) > 0 and len(celltype_to_profile_idx) > 0
+            # Standard models have outputs named 'logits_profile_predictions' and 'logcount_predictions'
+            # Check if any output name contains celltype-specific names (not just 'predictions')
+            has_celltype_specific_outputs = len(celltype_names) > 0 and len(celltype_to_profile_idx) > 0
+            # Check if outputs are standard model outputs (not multitask)
+            has_standard_outputs = any('logits_profile_predictions' in name or 'logcount_predictions' in name 
+                                     for name in output_names_list)
+            # Multitask model must have celltype-specific outputs AND not have standard outputs
+            is_actual_multitask_model = has_celltype_specific_outputs and not has_standard_outputs
             
             # Debug: Log model type detection
             if idx == 0:  # Only log for first batch to avoid spam
@@ -331,7 +374,8 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                 counts_sum_predictions.extend(batch_counts_preds)
             else:
                 # Single-output model (bias model) with dictionary-formatted targets
-                # Extract targets by averaging across all celltypes or using first non-zero target
+                # This happens when multitask generator is used but model is standard (e.g., bias model evaluation)
+                # Extract targets by using first non-zero target or first available target
                 batch_true_counts = []
                 batch_profile_preds = []
                 batch_true_counts_sum = []
@@ -341,8 +385,14 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                 profile_keys = [k for k in y.keys() if k.startswith('logits_profile_')]
                 count_keys = [k for k in y.keys() if k.startswith('logcount_')]
                 
+                if idx == 0:  # Debug: log for first batch
+                    print(f"DEBUG: Single-output model with dictionary targets")
+                    print(f"DEBUG: Profile keys: {profile_keys[:5]}...")
+                    print(f"DEBUG: Count keys: {count_keys[:5]}...")
+                    print(f"DEBUG: Model outputs: {[out.name for out in model.outputs]}")
+                
                 for i in range(batch_size):
-                    # For bias model, use first non-zero target or average across celltypes
+                    # For bias model, use first non-zero target or first available target
                     # Since bias model learns average bias across all celltypes, we can use any non-zero target
                     sample_profile = None
                     sample_count = None
@@ -363,6 +413,16 @@ def run_predictions(model, data_generator, scaling_factor=1.0):
                         sample_profile = y[profile_keys[0]][i]
                     if sample_count is None and count_keys:
                         sample_count = y[count_keys[0]][i, 0]
+                    
+                    # Handle case where no targets found (should not happen, but handle gracefully)
+                    if sample_profile is None:
+                        raise ValueError(
+                            f"No profile targets found in dictionary. Available keys: {list(y.keys())}"
+                        )
+                    if sample_count is None:
+                        raise ValueError(
+                            f"No count targets found in dictionary. Available keys: {list(y.keys())}"
+                        )
                     
                     batch_true_counts.append(sample_profile)
                     batch_true_counts_sum.append(sample_count)

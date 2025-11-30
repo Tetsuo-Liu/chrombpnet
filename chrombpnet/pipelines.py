@@ -66,18 +66,19 @@ def chrombpnet_train_pipeline(args):
 	print("Bias model pearsonr performance in peaks is: {}".format(str(np.round(bias_metrics["counts_metrics"]["peaks"]["pearsonr"],2))))
 	assert(bias_metrics["counts_metrics"]["peaks"]["pearsonr"] > -0.5) # bias model has negative correlation in peaks - AT rich bias model. Increase bias threshold and retrain bias model. Or use a different bias model with higher bias threshold. 
 	
-	# Check if celltype_aggregate mode is enabled
+	# Check if celltype_aggregate or multitask_celltype mode is enabled
 	use_celltype_aggregate = hasattr(args, 'data_generator_type') and args.data_generator_type == 'celltype_aggregate'
+	use_multitask_celltype = hasattr(args, 'data_generator_type') and args.data_generator_type == 'multitask_celltype'
 	
 	# separating models from logs
-	# In celltype_aggregate mode, bias_model_scaled.h5 is not created (original bias model is used)
-	if not use_celltype_aggregate:
+	# In celltype_aggregate and multitask_celltype modes, bias_model_scaled.h5 is not created (original bias model is used)
+	if not use_celltype_aggregate and not use_multitask_celltype:
 		os.rename(os.path.join(args.output_dir,"auxiliary/{}bias_model_scaled.h5".format(fpx)),os.path.join(args.output_dir,"models/{}bias_model_scaled.h5".format(fpx)))
 	os.rename(os.path.join(args.output_dir,"auxiliary/{}chrombpnet_model_params.tsv".format(fpx)),os.path.join(args.output_dir,"logs/{}chrombpnet_model_params.tsv".format(fpx)))
 	os.rename(os.path.join(args.output_dir,"auxiliary/{}chrombpnet_data_params.tsv".format(fpx)),os.path.join(args.output_dir,"logs/{}chrombpnet_data_params.tsv".format(fpx)))
 
 	# Update bias_model_path in params file if bias_model_scaled.h5 was created
-	if not use_celltype_aggregate:
+	if not use_celltype_aggregate and not use_multitask_celltype:
 		params = open(os.path.join(args.output_dir,"logs/{}chrombpnet_model_params.tsv".format(fpx))).read()
 		params = params.replace(os.path.join(args.output_dir,"auxiliary/{}bias_model_scaled.h5".format(fpx)),os.path.join(args.output_dir,"models/{}bias_model_scaled.h5".format(fpx)))
 		with open(os.path.join(args.output_dir,"logs/{}chrombpnet_model_params.tsv".format(fpx)),"w") as f:
