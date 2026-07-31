@@ -1,5 +1,15 @@
 # Changelog
 
+## Version - 1.0.1+tetsuoliu.1
+- Added direct input of an already shifted, unscaled, unstranded bigWig to the
+  bias and ChromBPNet training commands.
+- Added a command to generate a reusable genome-wide GC profile and an option
+  to reuse that profile during nonpeak generation.
+- Added order-preserving parallel foreground-GC and bigWig count retrieval.
+- Avoided sequence extraction where hyperparameter selection requires only
+  observed counts. The official model architectures and training code are
+  unchanged.
+
 ##  Version - 1.5
 - Fixed issue #150, regions_used not found while generating bigwigs from impotance h5s
 

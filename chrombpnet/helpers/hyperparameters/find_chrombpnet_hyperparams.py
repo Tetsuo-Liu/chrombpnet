@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 from chrombpnet.helpers.hyperparameters import param_utils as param_utils
+from chrombpnet.helpers.hyperparameters.region_counts import get_region_counts
 from tensorflow import keras
 import json
 
@@ -18,6 +19,8 @@ def parse_data_args():
     parser.add_argument("-oth", "--outlier-threshold", type=float, default=0.9999, help="threshold to use to filter outlies")
     parser.add_argument("-j", "--max-jitter", type=int, required=True, default=500, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
     parser.add_argument("-fl", "--chr-fold-path", type=str, required=True, help="Fold information - dictionary with test,valid and train keys and values with corresponding chromosomes")
+    parser.add_argument("-s", "--seed", type=int, default=1234, help="Seed for hyperparameter nonpeak sampling")
+    parser.add_argument("--jobs", type=int, default=1, help="Number of parallel jobs for count retrieval")
     return parser
 
 def parse_model_args(parser):
@@ -66,9 +69,8 @@ def main(args):
     test_chroms_to_keep=splits_dict["test"]
     print("evaluating hyperparameters on the following chromosomes",chroms_to_keep)
 
-    # read from bigwigw and fasta file
-    bw = pyBigWig.open(args.bigwig) 
-    genome = pyfaidx.Fasta(args.genome)
+    # read from bigwig for edge filtering
+    bw = pyBigWig.open(args.bigwig)
 
     # read peaks and non peaks    
     in_peaks =  pd.read_csv(args.peaks,
@@ -98,16 +100,18 @@ def main(args):
    
     nonpeaks = param_utils.filter_edge_regions(nonpeaks, bw, args.inputlen, peaks_bool=0)
     test_nonpeaks = param_utils.filter_edge_regions(test_nonpeaks, bw, args.inputlen, peaks_bool=0)
+    bw.close()
 
     # step 2 filtering: filter peaks that are outliers in train and valid set - no filtering on test set
-    peak_cnts, _ = param_utils.get_seqs_cts(genome, bw, peaks, args.inputlen, args.outputlen)
-    nonpeak_cnts, nonpeak_seqs = param_utils.get_seqs_cts(genome, bw, nonpeaks, args.inputlen, args.outputlen)    
+    peak_cnts = get_region_counts(args.bigwig, peaks, args.outputlen, args.jobs)
+    nonpeak_cnts = get_region_counts(args.bigwig, nonpeaks, args.outputlen, args.jobs)
     assert(len(peak_cnts) == peaks.shape[0])
     assert(len(nonpeak_cnts) == nonpeaks.shape[0])
 
 
     if args.negative_sampling_ratio > 0:
-        final_cnts = np.concatenate((peak_cnts,np.random.choice(nonpeak_cnts, replace=False, size=(int(args.negative_sampling_ratio*len(peak_cnts))))))
+        rng = np.random.default_rng(args.seed)
+        final_cnts = np.concatenate((peak_cnts,rng.choice(nonpeak_cnts, replace=False, size=(int(args.negative_sampling_ratio*len(peak_cnts))))))
     else:
         final_cnts = peak_cnts
 
@@ -115,7 +119,9 @@ def main(args):
     lower_thresh = np.quantile(final_cnts, 1-args.outlier_threshold)
 
     peaks = peaks[(peak_cnts< upper_thresh) & (peak_cnts>lower_thresh)]
-    nonpeaks = nonpeaks[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)]
+    scaling_mask = (nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)
+    nonpeaks = nonpeaks[scaling_mask]
+    scaling_counts = nonpeak_cnts[scaling_mask]
 
     print("Number of peaks after removing outliers: ", peaks.shape[0])
     print("Number of nonpeaks after removing outliers: ", nonpeaks.shape[0])
@@ -145,8 +151,16 @@ def main(args):
 
     # adjust bias model for training  - using train and validation set
     # the bias model might be trained on a difference read depth compared to the given data - so this step scales the bias model to account for that
+    genome = pyfaidx.Fasta(args.genome)
+    bw = pyBigWig.open(args.bigwig)
+    extracted_counts, nonpeak_seqs = param_utils.get_seqs_cts(
+        genome, bw, nonpeaks, args.inputlen, args.outputlen
+    )
+    bw.close()
+    genome.close()
+    assert np.array_equal(extracted_counts, scaling_counts)
     bias_model = param_utils.load_model_wrapper(args.bias_model_path)
-    bias_model_scaled = adjust_bias_model_logcounts(bias_model, nonpeak_seqs[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)], nonpeak_cnts[(nonpeak_cnts< upper_thresh) & (nonpeak_cnts>lower_thresh)])
+    bias_model_scaled = adjust_bias_model_logcounts(bias_model, nonpeak_seqs, scaling_counts)
     # save the new bias model
     bias_model_scaled.save("{}bias_model_scaled.h5".format(args.output_prefix))
 
