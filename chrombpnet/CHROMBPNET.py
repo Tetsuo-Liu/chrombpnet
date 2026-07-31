@@ -9,6 +9,28 @@ import logging
 logging.getLogger('matplotlib.font_manager').disabled = True
 
 
+def _copy_validated_gc_profile(source_path, destination_path, inputlen):
+	rows = 0
+	with open(source_path) as source, open(destination_path, "w") as destination:
+		for line_number, line in enumerate(source, start=1):
+			if not line.strip():
+				continue
+			fields = line.rstrip("\n").split("\t")
+			if len(fields) < 3:
+				raise ValueError(
+					"Genome-wide GC profile line {} has fewer than 3 columns".format(line_number)
+				)
+			if int(fields[2]) - int(fields[1]) != inputlen:
+				raise ValueError(
+					"Genome-wide GC profile window width does not match inputlen "
+					"on line {}".format(line_number)
+				)
+			destination.write(line)
+			rows += 1
+	if rows == 0:
+		raise ValueError("Genome-wide GC profile is empty")
+
+
 # invoke pipeline modules based on command
 
 def main():
@@ -100,21 +122,37 @@ def main():
 
 	elif args.cmd == "prep":
 	
-		if args.cmd_prep == "nonpeaks":
+		if args.cmd_prep == "genomewide-gc":
+			assert(args.inputlen%2==0) # input length should be a multiple of 2
+			from chrombpnet.helpers.make_gc_matched_negatives.get_genomewide_gc_buckets.get_genomewide_gc_bins import get_genomewide_gc
+			get_genomewide_gc(args.genome,args.output_prefix+".bed",args.inputlen,args.stride)
+
+		elif args.cmd_prep == "nonpeaks":
 
 			assert(args.inputlen%2==0) # input length should be a multiple of 2
 	
 			os.makedirs(args.output_prefix+"_auxiliary/", exist_ok=False)
 	
-			from chrombpnet.helpers.make_gc_matched_negatives.get_genomewide_gc_buckets.get_genomewide_gc_bins import get_genomewide_gc
-			get_genomewide_gc(args.genome,args.output_prefix+"_auxiliary/genomewide_gc.bed",args.inputlen, args.stride)
+			if args.genomewide_gc_profile:
+				_copy_validated_gc_profile(
+					args.genomewide_gc_profile,
+					args.output_prefix+"_auxiliary/genomewide_gc.bed",
+					args.inputlen,
+				)
+			else:
+				from chrombpnet.helpers.make_gc_matched_negatives.get_genomewide_gc_buckets.get_genomewide_gc_bins import get_genomewide_gc
+				get_genomewide_gc(args.genome,args.output_prefix+"_auxiliary/genomewide_gc.bed",args.inputlen, args.stride)
 	
 			# get gc content in peaks
 			import chrombpnet.helpers.make_gc_matched_negatives.get_gc_content as get_gc_content
-			args_copy = copy.deepcopy(args)
-			args_copy.input_bed = args_copy.peaks
-			args_copy.output_prefix = args.output_prefix+"_auxiliary/foreground.gc"
-			get_gc_content.main(args_copy)
+			get_gc_content.process_gc_content(
+				input_bed=args.peaks,
+				chrom_sizes=args.chrom_sizes,
+				genome=args.genome,
+				output_prefix=args.output_prefix+"_auxiliary/foreground.gc",
+				inputlen=args.inputlen,
+				jobs=args.jobs,
+			)
 	
 			# prepare candidate negatives
 	

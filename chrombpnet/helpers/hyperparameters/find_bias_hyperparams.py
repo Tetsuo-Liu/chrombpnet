@@ -1,11 +1,10 @@
 import argparse
-import pyfaidx
 import pyBigWig
 import pandas as pd
 import numpy as np
-import os
 import json
 import chrombpnet.helpers.hyperparameters.param_utils as param_utils
+from chrombpnet.helpers.hyperparameters.region_counts import get_region_counts
 
 def parse_data_args():
     parser=argparse.ArgumentParser(description="find hyper-parameters for chrombpnet defined in src/training/models/chrombpnet_with_bias_model.py")
@@ -17,6 +16,7 @@ def parse_data_args():
     parser.add_argument("-oth", "--outlier-threshold", type=float, default=0.9999, help="threshold to use to filter outlies")
     parser.add_argument("-j", "--max-jitter", type=int, default=50, help="Maximum jitter applied on either side of region (default 500 for chrombpnet model)")
     parser.add_argument("-fl", "--chr-fold-path", type=str, required=True, help="Fold information - dictionary with test,valid and train keys and values with corresponding chromosomes")
+    parser.add_argument("--jobs", type=int, default=1, help="Number of parallel jobs for count retrieval")
     return parser
 
 def parse_model_args(parser):
@@ -38,9 +38,8 @@ def main(args):
     test_chroms_to_keep=splits_dict["test"]
     print("evaluating hyperparameters on the following chromosomes",chroms_to_keep)
 
-    # read from bigwigs and fasta file
-    bw = pyBigWig.open(args.bigwig) 
-    genome = pyfaidx.Fasta(args.genome)
+    # read from bigwig
+    bw = pyBigWig.open(args.bigwig)
 
     # read peaks and non peaks    
     in_peaks =  pd.read_csv(args.peaks,
@@ -70,10 +69,11 @@ def main(args):
 
     peaks = param_utils.filter_edge_regions(peaks, bw, args.inputlen, peaks_bool=1)
     test_peaks = param_utils.filter_edge_regions(test_peaks, bw, args.inputlen, peaks_bool=1)
+    bw.close()
 
     # step 2 filtering: filter nonpeaks that have counts less than a threshold_factor (minimum of peak counts)
-    peak_cnts, _ = param_utils.get_seqs_cts(genome, bw, peaks, args.inputlen, args.outputlen)
-    nonpeak_cnts, _ = param_utils.get_seqs_cts(genome, bw, nonpeaks, args.inputlen, args.outputlen)    
+    peak_cnts = get_region_counts(args.bigwig, peaks, args.outputlen, args.jobs)
+    nonpeak_cnts = get_region_counts(args.bigwig, nonpeaks, args.outputlen, args.jobs)
     assert(len(peak_cnts) == peaks.shape[0])
     assert(len(nonpeak_cnts) == nonpeaks.shape[0])
 

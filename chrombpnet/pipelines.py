@@ -6,6 +6,24 @@ from chrombpnet.data import DefaultDataFile, get_default_data_path
 from chrombpnet.data import print_meme_motif_file
 import numpy as np
 
+
+def _prepare_bigwig(args, file_prefix):
+	if args.input_bigwig:
+		bigwig_path = os.path.abspath(args.input_bigwig)
+		if not os.path.isfile(bigwig_path):
+			raise FileNotFoundError("Input bigWig does not exist: {}".format(bigwig_path))
+		args.bigwig = bigwig_path
+		print("Using precomputed shifted, unscaled bigWig: {}".format(bigwig_path))
+		return
+
+	import chrombpnet.helpers.preprocessing.reads_to_bigwig as reads_to_bigwig
+	args.output_prefix = os.path.join(args.output_dir,"auxiliary/{}data".format(file_prefix))
+	args.plus_shift = None
+	args.minus_shift = None
+	reads_to_bigwig.main(args)
+	args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(file_prefix))
+
+
 def chrombpnet_train_pipeline(args):
 
 	if args.file_prefix:
@@ -13,16 +31,11 @@ def chrombpnet_train_pipeline(args):
 	else:
 		fpx = ""
 		
-	# Shift bam and convert to bigwig
-	import chrombpnet.helpers.preprocessing.reads_to_bigwig as reads_to_bigwig	
-	args.output_prefix = os.path.join(args.output_dir,"auxiliary/{}data".format(fpx))
-	args.plus_shift = None
-	args.minus_shift = None
-	reads_to_bigwig.main(args)
+	# Shift input reads and convert to bigwig, or use a prepared bigwig.
+	_prepare_bigwig(args, fpx)
 	
 	# QC bigwig
 	import chrombpnet.helpers.preprocessing.analysis.build_pwm_from_bigwig as build_pwm_from_bigwig	
-	args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
 	args.output_prefix = os.path.join(args.output_dir,"evaluation/{}bw_shift_qc".format(fpx))
 	folds = json.load(open(args.chr_fold_path))
 	assert(len(folds["valid"]) > 0) # validation list of chromosomes is empty
@@ -270,16 +283,11 @@ def train_bias_pipeline(args):
 	else:
 		fpx = ""
 		
-	# Shift bam and convert to bigwig
-	import chrombpnet.helpers.preprocessing.reads_to_bigwig as reads_to_bigwig	
-	args.output_prefix = os.path.join(args.output_dir,"auxiliary/{}data".format(fpx))
-	args.plus_shift = None
-	args.minus_shift = None
-	reads_to_bigwig.main(args)
+	# Shift input reads and convert to bigwig, or use a prepared bigwig.
+	_prepare_bigwig(args, fpx)
 	
 	# QC bigwig
 	import chrombpnet.helpers.preprocessing.analysis.build_pwm_from_bigwig as build_pwm_from_bigwig	
-	args.bigwig = os.path.join(args.output_dir,"auxiliary/{}data_unstranded.bw".format(fpx))
 	args.output_prefix = os.path.join(args.output_dir,"evaluation/{}bw_shift_qc".format(fpx))
 	folds = json.load(open(args.chr_fold_path))
 	assert(len(folds["valid"]) > 0) # validation list of chromosomes is empty
